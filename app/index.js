@@ -112,7 +112,7 @@ app.delete('/bot/:bot_name', (req, res) => {
 });
 
 app.listen(config.get('port'), config.get('hostname'), () => {
-    console.log('Server running on port 3000');
+    console.log(`Server running on port ${config.get('port')}`);
 });
 
 

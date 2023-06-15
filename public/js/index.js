@@ -19,7 +19,7 @@ function createBotWidget(botName, title, description, status) {
     $(`#${botName}-switch`).change(function () {
         let status = this.checked;
         $.ajax({
-            url: `http://localhost:3000/bot/${botName}`,
+            url: `/bot/${botName}`,
             type: 'POST',
             data: JSON.stringify({status: status}),
             contentType: 'application/json; charset=utf-8',
@@ -29,7 +29,7 @@ function createBotWidget(botName, title, description, status) {
     });
     $(`#${botName}-widget .delete-bot-widget-button`).click(function () {
         $.ajax({
-            url: `http://localhost:3000/bot/${botName}`,
+            url: `/bot/${botName}`,
             type: 'DELETE',
             success: function () {
                 $(`#${botName}-widget`).remove();
@@ -73,7 +73,7 @@ $(document).ready(function () {
     });
 
     // Get the initial bot states
-    $.getJSON(`http://localhost:3000/bots`, (data) => {
+    $.getJSON(`/bots`, (data) => {
         data.forEach(bot => {
             createBotWidget(bot.botName, bot.title, bot.description, bot.status);
             if (isAdminModeSet) {
@@ -88,7 +88,7 @@ $(document).ready(function () {
         let title = $('#bot-title-input').val();
         let description = $('#bot-description-input').val();
         $.ajax({
-            url: `http://localhost:3000/bot/${botName}`,
+            url: `/bot/${botName}`,
             type: 'POST',
             data: JSON.stringify({
                 title: title,
