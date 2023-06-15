@@ -74,11 +74,11 @@ $(document).ready(function () {
 
     // Get the initial bot states
     $.getJSON(`/bots`, (data) => {
+        if (isAdminModeSet) {
+            applyAdminMode();
+        }
         data.forEach(bot => {
             createBotWidget(bot.botName, bot.title, bot.description, bot.status);
-            if (isAdminModeSet) {
-                applyAdminMode();
-            }
         });
     });
 
