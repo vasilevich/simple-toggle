@@ -21,105 +21,109 @@ db.run('CREATE TABLE IF NOT EXISTS bot_control(bot_name text PRIMARY KEY, title 
 const app = express();
 
 app.use(express.static('public'));
-
 app.use(bodyParser.json());
 app.use(cors());
 
-app.use((req, res, next) => {
+
+const verify_request = (req, res) => {
     const query_param_token = req.query.token;
 
     if (query_param_token && query_param_token === token) {
-        next();
-        return;
+        return true;
     }
 
     const authHeader = req.headers.authorization;
     if (!authHeader) {
         res.status(401).send('Authorization header missing');
-        return;
+        return false;
     }
 
 
     const authParts = authHeader.split(' ');
     if (authParts.length != 2 || authParts[0].toLowerCase() != 'bearer') {
         res.status(401).send('Invalid authorization format');
-        return;
+        return false;
     }
 
     let providedToken = authParts[1];
     if (providedToken != token) {
         res.status(401).send('Invalid token');
-        return;
+        return false;
     }
-
-    next();
-});
+    return true;
+}
 
 
 app.get('/bots', (req, res) => {
-    let sql = 'SELECT * FROM bot_control';
-    db.all(sql, [], (err, rows) => {
-        if (err) {
-            return console.error(err.message);
-        }
-        res.json(rows.map(row => ({
-            botName: row.bot_name,
-            title: row.title,
-            description: row.description,
-            status: row.status === 1
-        })));
-    });
+    if (verify_request(req, res)) {
+        let sql = 'SELECT * FROM bot_control';
+
+        db.all(sql, [], (err, rows) => {
+            if (err) {
+                return console.error(err.message);
+            }
+            res.json(rows.map(row => ({
+                botName: row.bot_name,
+                title: row.title,
+                description: row.description,
+                status: row.status === 1
+            })));
+        });
+    }
 });
 
 
 app.post('/bot/:bot_name', (req, res) => {
-    let data = [req.params.bot_name, req.body.title, req.body.description, req.body.status ? 1 : 0];
-    let checkSql = 'SELECT * FROM bot_control WHERE bot_name = ?';
-    db.get(checkSql, [req.params.bot_name], (err, row) => {
-        if (err) {
-            console.log(err);
-            return res.status(500).send(err);
-        }
+    if (verify_request(req, res)) {
+        let data = [req.params.bot_name, req.body.title, req.body.description, req.body.status ? 1 : 0];
+        let checkSql = 'SELECT * FROM bot_control WHERE bot_name = ?';
+        db.get(checkSql, [req.params.bot_name], (err, row) => {
+            if (err) {
+                console.log(err);
+                return res.status(500).send(err);
+            }
 
-        if (row) {
-            console.log(`Found bot: ${JSON.stringify(row)}`);
-            let updateSql = 'UPDATE bot_control SET status = ? WHERE bot_name = ?';
-            db.run(updateSql, [req.body.status ? 1 : 0, req.params.bot_name], (err) => {
-                if (err) {
-                    console.log(err);
-                    return res.status(500).send(err);
-                }
+            if (row) {
+                console.log(`Found bot: ${JSON.stringify(row)}`);
+                let updateSql = 'UPDATE bot_control SET status = ? WHERE bot_name = ?';
+                db.run(updateSql, [req.body.status ? 1 : 0, req.params.bot_name], (err) => {
+                    if (err) {
+                        console.log(err);
+                        return res.status(500).send(err);
+                    }
 
-                res.json({status: req.body.status ? true : false});
-            });
-        } else {
-            console.log(`Inserting new bot: ${JSON.stringify(data)}`);
-            let insertSql = 'INSERT INTO bot_control(bot_name, title, description, status) VALUES(?, ?, ?, ?)';
-            db.run(insertSql, data, (err) => {
-                if (err) {
-                    console.log(err);
-                    return res.status(500).send(err);
-                }
+                    res.json({status: req.body.status ? true : false});
+                });
+            } else {
+                console.log(`Inserting new bot: ${JSON.stringify(data)}`);
+                let insertSql = 'INSERT INTO bot_control(bot_name, title, description, status) VALUES(?, ?, ?, ?)';
+                db.run(insertSql, data, (err) => {
+                    if (err) {
+                        console.log(err);
+                        return res.status(500).send(err);
+                    }
 
-                res.json({status: req.body.status ? true : false});
-            });
-        }
-    });
+                    res.json({status: req.body.status ? true : false});
+                });
+            }
+        });
+    }
 });
 
 
 app.delete('/bot/:bot_name', (req, res) => {
-    let sql = 'DELETE FROM bot_control WHERE bot_name = ?';
-    db.run(sql, [req.params.bot_name], (err) => {
-        if (err) {
-            console.log(err);
-            return res.status(500).send(err);
-        }
+    if (verify_request(req, res)) {
+        let sql = 'DELETE FROM bot_control WHERE bot_name = ?';
+        db.run(sql, [req.params.bot_name], (err) => {
+            if (err) {
+                console.log(err);
+                return res.status(500).send(err);
+            }
 
-        res.json({status: 'success'});
-    });
+            res.json({status: 'success'});
+        });
+    }
 });
-
 
 const wsProxy = createProxyMiddleware({
     target: 'http://kuma',
@@ -128,12 +132,9 @@ const wsProxy = createProxyMiddleware({
     ws: true,
     logger: console,
 });
-
 app.use(wsProxy);
 app.on('upgrade', wsProxy.upgrade);
 
-
-//app.use('/', createProxyMiddleware({ target: 'http://kuma',ws:true, changeOrigin: true, pathRewrite: {'^/': ''} }));
 app.use('/dashboard', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
 app.use('/assets', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
 app.use('/manifest.json', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
