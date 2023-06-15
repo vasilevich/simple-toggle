@@ -143,16 +143,3 @@ app.use('/manifest.json', createProxyMiddleware({target: 'http://kuma', ws: true
 app.listen(config.get('port'), config.get('hostname'), () => {
     console.log(`Server running on port ${config.get('port')}`);
 });
-
-
-require("greenlock-express")
-    .init({
-        packageRoot: './',
-        configDir: "./greenlock.d",
-
-        // contact for security and critical bug notices
-        maintainerEmail: "jon@example.com",
-
-        // whether or not to run at cloudscale
-        cluster: false
-    })
