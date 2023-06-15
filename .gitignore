@@ -3,3 +3,4 @@ config/production.json
 config/development.json
 config/test.json
 data/*
+greenlock.d

@@ -114,3 +114,16 @@ app.delete('/bot/:bot_name', (req, res) => {
 app.listen(config.get('port'), config.get('hostname'), () => {
     console.log('Server running on port 3000');
 });
+
+
+require("greenlock-express")
+    .init({
+        packageRoot: './',
+        configDir: "./greenlock.d",
+
+        // contact for security and critical bug notices
+        maintainerEmail: "jon@example.com",
+
+        // whether or not to run at cloudscale
+        cluster: false
+    })
