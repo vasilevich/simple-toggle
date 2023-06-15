@@ -3,6 +3,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
+const {createProxyMiddleware} = require("http-proxy-middleware");
 const token = config.get('token');  // Replace with your actual static token
 const db = new sqlite3.Database(config.get('db').path, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
     if (err) {
@@ -46,6 +47,11 @@ app.use((req, res, next) => {
 
 app.use(bodyParser.json());
 app.use(cors());
+
+
+app.use('/kuma', createProxyMiddleware({ target: 'http://kuma', changeOrigin: true }));
+
+
 
 app.get('/bots', (req, res) => {
     let sql = 'SELECT * FROM bot_control';
