@@ -22,14 +22,25 @@ const app = express();
 
 app.use(express.static('public'));
 
+app.use(bodyParser.json());
+app.use(cors());
+
 app.use((req, res, next) => {
-    let authHeader = req.headers.authorization;
+    const query_param_token = req.query.token;
+
+    if (query_param_token && query_param_token === token) {
+        next();
+        return;
+    }
+
+    const authHeader = req.headers.authorization;
     if (!authHeader) {
         res.status(401).send('Authorization header missing');
         return;
     }
 
-    let authParts = authHeader.split(' ');
+
+    const authParts = authHeader.split(' ');
     if (authParts.length != 2 || authParts[0].toLowerCase() != 'bearer') {
         res.status(401).send('Invalid authorization format');
         return;
@@ -43,14 +54,6 @@ app.use((req, res, next) => {
 
     next();
 });
-
-
-app.use(bodyParser.json());
-app.use(cors());
-
-
-app.use('/kuma', createProxyMiddleware({ target: 'http://kuma', changeOrigin: true }));
-
 
 
 app.get('/bots', (req, res) => {
@@ -116,6 +119,25 @@ app.delete('/bot/:bot_name', (req, res) => {
         res.json({status: 'success'});
     });
 });
+
+
+const wsProxy = createProxyMiddleware({
+    target: 'http://kuma',
+
+    changeOrigin: true,
+    ws: true,
+    logger: console,
+});
+
+app.use(wsProxy);
+app.on('upgrade', wsProxy.upgrade);
+
+
+//app.use('/', createProxyMiddleware({ target: 'http://kuma',ws:true, changeOrigin: true, pathRewrite: {'^/': ''} }));
+app.use('/dashboard', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
+app.use('/assets', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
+app.use('/manifest.json', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
+
 
 app.listen(config.get('port'), config.get('hostname'), () => {
     console.log(`Server running on port ${config.get('port')}`);
