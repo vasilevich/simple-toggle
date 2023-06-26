@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Bot Value Set</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<div class="container">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="text-center my-5">Set Value for key '<span id="key"></span>'</h1>
+            <div class="card">
+                <div class="card-body">
+                    <form id="value-form">
+                        <div id="description">
+                        </div>
+                        <div class="form-group">
+                            <label for="value">Value:</label>
+                            <input type="text" id="value" class="form-control">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Submit</button>
+                    </form>
+                </div>
+            </div>
+            <div id="success-message" class="alert alert-success mt-3 d-none">
+                set successfully!
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+<script src="js/bot_value_set.js"></script>
+</body>
+</html>

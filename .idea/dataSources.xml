@@ -1,12 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourceManagerImpl" format="xml" multifile-model="true">
-    <data-source source="LOCAL" name="botcontrol" uuid="e580fbdf-c2e9-4064-8025-3b7a048f53be">
+    <data-source source="LOCAL" name="botcontrol" uuid="557a1566-3bc8-4666-b593-eff1a0e63bc6">
       <driver-ref>sqlite.xerial</driver-ref>
       <synchronize>true</synchronize>
       <jdbc-driver>org.sqlite.JDBC</jdbc-driver>
-      <jdbc-url>jdbc:sqlite:C:\Users\yosef\IdeaProjects\bots-status-manager\botcontrol.db</jdbc-url>
+      <jdbc-url>jdbc:sqlite:C:\Users\yosef\IdeaProjects\bots-status-manager\data\botcontrol.db</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
+      <libraries>
+        <library>
+          <url>file://$APPLICATION_CONFIG_DIR$/jdbc-drivers/Xerial SQLiteJDBC/3.40.1/org/xerial/sqlite-jdbc/3.40.1.0/sqlite-jdbc-3.40.1.0.jar</url>
+        </library>
+      </libraries>
     </data-source>
   </component>
 </project>
