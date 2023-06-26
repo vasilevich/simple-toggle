@@ -115,9 +115,10 @@ app.get('/bot/generate_link', async (req, res) => {
             res.json({
                 key: req.query.key,
                 token: randomToken,
-                set_value_url: `${req.protocol}://${req.hostname}:${config.get('port')}/bot/set_value/${randomToken}&token=${token}`,
-                get_value_url: `${req.protocol}://${req.hostname}:${config.get('port')}/bot/get_value/${randomToken}&token=${token}`,
-                user_url: `${req.protocol}://${req.hostname}:${config.get('port')}/bot_value_set.html?valueToken=${randomToken}&token=${token}`
+                url: `${req.protocol}://${req.hostname}:${config.get('port')}`,
+                set_value_path: `bot/set_value/${randomToken}&token=${token}`,
+                get_value_path: `bot/get_value/${randomToken}&token=${token}`,
+                user_path: `bot_value_set.html?valueToken=${randomToken}&token=${token}`
             });
         } catch (err) {
             console.log(err);
