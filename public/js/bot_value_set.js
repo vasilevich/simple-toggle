@@ -11,7 +11,7 @@
 // Fetch current key, description, and value
     $.get(`/bot/get_value/${encodeURIComponent(valueToken)}?token=${encodeURIComponent(token)}`, (data) => {
         $('#key').text(data.key);
-        $('#description').text(data.description);
+        $('#description').html(data.description);
         $('#value').val(data.value);
     });
 
