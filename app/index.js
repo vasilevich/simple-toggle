@@ -202,11 +202,7 @@ app.get('/bot/get_value/:token', async (req, res) => {
                     res.set('Content-Type', 'text/plain');
                     return res.send(row.value);
                 } else {
-                    return res.json({
-                        key: row.key,
-                        value: row.value,
-                        status: row.status === 1
-                    });
+                    return res.json(row);
                 }
             } else {
                 return res.status(404).send({error: 'Invalid token.'});
