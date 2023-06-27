@@ -164,27 +164,49 @@ app.post('/bot/generate_link', async (req, res) => {
 });
 
 app.post('/bot/set_value/:token', async (req, res) => {
-    const token = req.params.token;
-    const value = req.body.value;
+    if (verify_request(req, res)) {
+        const token = req.params.token;
+        const value = req.body.value;
 
-    try {
-        const now = new Date();
-        const row = await knex('bot_single_value_control').where('token', token).first();
+        try {
+            const now = new Date();
+            const row = await knex('bot_single_value_control').where('token', token).first();
 
-        if (row) {
-            const result = await knex('bot_single_value_control').where('token', token).update({
-                value: value,
-                status: 1,
-                updated_at: now
-            });
+            if (row) {
+                const result = await knex('bot_single_value_control').where('token', token).update({
+                    value: value,
+                    status: 1,
+                    updated_at: now
+                });
 
-            return res.json({status: "success"});
-        } else {
-            return res.status(404).send({error: 'Invalid token.'});
+                return res.json({status: "success"});
+            } else {
+                return res.status(404).send({error: 'Invalid token.'});
+            }
+        } catch (err) {
+            console.log(err);
+            return res.status(500).send(err);
         }
-    } catch (err) {
-        console.log(err);
-        return res.status(500).send(err);
+    }
+});
+
+app.delete('/bot/delete_value/:token', async (req, res) => {
+    if (verify_request(req, res)) {
+        const token = req.params.token;
+
+        try {
+            const row = await knex('bot_single_value_control').where('token', token).first();
+            if (row) {
+                await knex('bot_single_value_control').where('token', token).del();
+
+                return res.json({success: 'Value deleted successfully.'});
+            } else {
+                return res.status(404).send({error: 'Invalid token.'});
+            }
+        } catch (err) {
+            console.log(err);
+            return res.status(500).send(err);
+        }
     }
 });
 
