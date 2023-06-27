@@ -127,6 +127,42 @@ app.get('/bot/generate_link', async (req, res) => {
     }
 });
 
+
+app.post('/bot/generate_link', async (req, res) => {
+    if (verify_request(req, res)) {
+        try {
+            // generate random token for the URL
+            const randomToken = await generateRandomToken();
+            const now = new Date();
+            const data = {
+                key: req.body.key,
+                description: req.body.description || req.query.description || '',
+                value: req.body.value || req.query.value || "",
+                status: 0,
+                token: randomToken,
+                bot_name: req.body.bot_name || req.query.bot_name || 'none',
+                updated_at: now,
+                created_at: now,
+            };
+
+            // insert a new row into the bot_single_value_control table
+            await knex('bot_single_value_control').insert(data);
+
+            res.json({
+                key: req.query.key,
+                token: randomToken,
+                url: `${req.protocol}://${req.hostname}:${config.get('port')}`,
+                set_value_path: `bot/set_value/${randomToken}&token=${token}`,
+                get_value_path: `bot/get_value/${randomToken}&token=${token}`,
+                user_path: `bot_value_set.html?valueToken=${randomToken}&token=${token}`
+            });
+        } catch (err) {
+            console.log(err);
+            return res.status(500).send(err);
+        }
+    }
+});
+
 app.post('/bot/set_value/:token', async (req, res) => {
     const token = req.params.token;
     const value = req.body.value;
