@@ -2,7 +2,7 @@
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
     const valueToken = urlParams.get('valueToken');
-    const valueUrl = `${location.protocol}//${location.host}/bot/get_value/${encodeURIComponent(valueToken)}?token=${encodeURIComponent(token)}`;
+    const valueUrl = `${location.protocol}//${location.host}/bot/get_value/${encodeURIComponent(valueToken)}?token=${encodeURIComponent(token)}&only_value=true`;
     $('#value-url')
         .text(valueUrl)
         .attr('href', valueUrl);
