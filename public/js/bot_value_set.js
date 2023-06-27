@@ -2,6 +2,11 @@
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
     const valueToken = urlParams.get('valueToken');
+    const valueUrl = `${location.protocol}//${location.host}/bot/get_value/${encodeURIComponent(valueToken)}?token=${encodeURIComponent(token)}`;
+    $('#value-url')
+        .text(valueUrl)
+        .attr('href', valueUrl);
+
 
 // Fetch current key, description, and value
     $.get(`/bot/get_value/${encodeURIComponent(valueToken)}?token=${encodeURIComponent(token)}`, (data) => {

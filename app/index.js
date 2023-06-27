@@ -156,16 +156,22 @@ app.post('/bot/set_value/:token', async (req, res) => {
 app.get('/bot/get_value/:token', async (req, res) => {
     if (verify_request(req, res)) {
         const token = req.params.token;
-
+        const isOnlyValue = (req.query.onlyvalue || req.query.only_value) === 'true';
         try {
             const row = await knex('bot_single_value_control').where('token', token).first();
 
             if (row) {
-                return res.json({
-                    key: row.key,
-                    value: row.value,
-                    status: row.status === 1
-                });
+                if (isOnlyValue) {
+                    // set content type to text/plain
+                    res.set('Content-Type', 'text/plain');
+                    return res.send(row.value);
+                } else {
+                    return res.json({
+                        key: row.key,
+                        value: row.value,
+                        status: row.status === 1
+                    });
+                }
             } else {
                 return res.status(404).send({error: 'Invalid token.'});
             }
