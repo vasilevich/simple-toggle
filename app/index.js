@@ -5,13 +5,21 @@ const cors = require('cors');
 const {createProxyMiddleware} = require("http-proxy-middleware");
 const rtg = require('random-token-generator');
 const token = config.get('token');  // Replace with your actual static token
-const knex = require('knex')({
-    client: 'sqlite3',
-    connection: {
-        filename: config.get('db').path
-    },
-    useNullAsDefault: true // as SQLite3 is the only client that allows NULL by default
-});
+
+if (config.get('knex') && config.get('knex').client === 'sqlite3') {
+    //mkdirs and make the db file
+    const fs = require('fs');
+    const path = require('path');
+    const dir = path.dirname(config.get('knex').connection.filename);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, {recursive: true});
+    }
+    if (!fs.existsSync(config.get('knex').connection.filename)) {
+        fs.writeFileSync(config.get('knex').connection.filename, '');
+    }
+}
+
+const knex = require('knex')(config.get('knex'));
 
 const generateRandomToken = () => {
     return new Promise(resolve => {
