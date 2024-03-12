@@ -20,7 +20,13 @@ if (config.get('knex') && config.get('knex').client === 'sqlite3') {
     }
 }
 
-const knex = require('knex')(config.util.toObject().knex);
+
+const knexConfig = config.util.toObject().knex;
+if (knexConfig.client === 'mariadb') {
+    knexConfig.client = require('knex-mariadb');
+}
+
+const knex = require('knex')(knexConfig);
 
 const generateRandomToken = () => {
     return new Promise(resolve => {

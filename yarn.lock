@@ -827,6 +827,11 @@ json5@^2.2.3:
   resolved "https://registry.yarnpkg.com/json5/-/json5-2.2.3.tgz#78cd6f1a19bdc12b73db5ad0c61efd66c1e29283"
   integrity sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==
 
+knex-mariadb@^2.0.0:
+  version "2.0.0"
+  resolved "https://registry.yarnpkg.com/knex-mariadb/-/knex-mariadb-2.0.0.tgz#a1538566f702a4f0f150b5f6745c06fc84697709"
+  integrity sha512-GhFGsxU73vW7bKz22jvHseJnzIfnPQby+weeYlY89qltABjyhQrGCn/uYcGOU10wF1MZubDPt44HQb3IAbaQsw==
+
 knex@^2.4.2:
   version "2.5.1"
   resolved "https://registry.yarnpkg.com/knex/-/knex-2.5.1.tgz#a6c6b449866cf4229f070c17411f23871ba52ef9"
