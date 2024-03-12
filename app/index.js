@@ -64,7 +64,7 @@ knex.schema
                 table.text('value');
                 table.text('description');
                 table.integer('status');
-                table.text('token');
+                table.text('token').unique();
                 table.text('bot_name');
                 table.date('updated_at');
                 table.date('created_at');
