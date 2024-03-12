@@ -6,7 +6,7 @@ const {createProxyMiddleware} = require("http-proxy-middleware");
 const rtg = require('random-token-generator');
 const {existsSync, unlinkSync, chmodSync} = require("fs");
 const token = config.get('token');  // Replace with your actual static token
-
+const url = (config.get("url") || `${req.protocol}://${req.hostname}:${config.get('port')}`).replace(/\/+$/, '');
 if (config.get('knex') && config.get('knex').client === 'sqlite3') {
     //mkdirs and make the db file
     const fs = require('fs');
@@ -126,7 +126,6 @@ app.get('/bot/generate_link', async (req, res) => {
 
             // insert a new row into the bot_single_value_control table
             await knex('bot_single_value_control').insert(data);
-            const url = (config.get("url") || `${req.protocol}://${req.hostname}:${config.get('port')}`).replace(/\/+$/, '');
             res.json({
                 key: req.query.key,
                 token: randomToken,
@@ -166,7 +165,7 @@ app.post('/bot/generate_link', async (req, res) => {
             res.json({
                 key: req.query.key,
                 token: randomToken,
-                url: `${req.protocol}://${req.hostname}:${config.get('port')}`,
+                url: url,
                 set_value_path: `bot/set_value/${randomToken}&token=${token}`,
                 get_value_path: `bot/get_value/${randomToken}&token=${token}`,
                 user_path: `bot_value_set.html?valueToken=${randomToken}&token=${token}`
