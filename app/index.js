@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const {createProxyMiddleware} = require("http-proxy-middleware");
 const rtg = require('random-token-generator');
+const {existsSync, unlinkSync, chmodSync} = require("fs");
 const token = config.get('token');  // Replace with your actual static token
 
 if (config.get('knex') && config.get('knex').client === 'sqlite3') {
@@ -334,6 +335,28 @@ app.use('/dashboard', createProxyMiddleware({target: 'http://kuma', ws: true, ch
 app.use('/assets', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
 app.use('/manifest.json', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
 
-app.listen(config.get('port'), config.get('hostname'), () => {
-    console.log(`Server running on port ${config.get('port')}`);
-});
+
+const port = config.get('port');
+const hostname = config.get('hostname');
+const unixPath = config.has('unixPath') ? config.get('unixPath') : null;
+
+if (unixPath) {
+    if (existsSync(unixPath)) {
+        unlinkSync(unixPath);
+    }
+    app.listen(unixPath, () => {
+        console.log(`Server running on unix socket at ${unixPath}`);
+        chmodSync(unixPath, '777');
+    });
+}
+
+if (port && hostname) {
+    app.listen(port, hostname, () => {
+        console.log(`Server running on port ${port}`);
+    });
+} else if (port) {
+    app.listen(port, () => {
+        console.log(`Server running on port ${port}`);
+    });
+}
+
