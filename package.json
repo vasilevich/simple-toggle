@@ -1,6 +1,10 @@
 {
   "name": "bots-status-manager",
   "version": "1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vasilevich/simple-toggle"
+  },
   "dependencies": {
     "body-parser": "^1.20.2",
     "config": "^3.3.9",
