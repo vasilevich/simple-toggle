@@ -126,7 +126,7 @@ app.get('/bot/generate_link', async (req, res) => {
 
             // insert a new row into the bot_single_value_control table
             await knex('bot_single_value_control').insert(data);
-            const url = config.get("url") || `${req.protocol}://${req.hostname}:${config.get('port')}`;
+            const url = (config.get("url") || `${req.protocol}://${req.hostname}:${config.get('port')}`).replace(/\/+$/, '');
             res.json({
                 key: req.query.key,
                 token: randomToken,
