@@ -126,11 +126,11 @@ app.get('/bot/generate_link', async (req, res) => {
 
             // insert a new row into the bot_single_value_control table
             await knex('bot_single_value_control').insert(data);
-
+            const url = config.get("url") || `${req.protocol}://${req.hostname}:${config.get('port')}`;
             res.json({
                 key: req.query.key,
                 token: randomToken,
-                url: `${req.protocol}://${req.hostname}:${config.get('port')}`,
+                url: url,
                 set_value_path: `bot/set_value/${randomToken}&token=${token}`,
                 get_value_path: `bot/get_value/${randomToken}&token=${token}`,
                 user_path: `bot_value_set.html?valueToken=${randomToken}&token=${token}`
@@ -278,7 +278,7 @@ app.get('/bot/:botName', async (req, res) => {
             if (row) {
                 return res.json({botName: row.bot_name, status: Boolean(row.status)});
             } else {
-                return res.status(404).send({error: 'Bot not found.'});
+                return res.status(404).send({code: 404, error: 'Bot not found.'});
             }
         } catch (err) {
             return res.status(500).send({error: 'An error occurred while retrieving bot status.'});
