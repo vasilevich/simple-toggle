@@ -45,7 +45,7 @@ knex.schema
     .then(function (exists) {
         if (!exists) {
             return knex.schema.createTable('bot_control', function (table) {
-                table.text('bot_name').primary();
+                table.string('bot_name', 255).primary();
                 table.text('title');
                 table.text('description');
                 table.integer('status');
