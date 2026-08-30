@@ -1,6 +1,7 @@
 class BotControl {
     static url = '';
     static token = '';
+    static DEFAULT_TEMP_LINK_MINUTES = 7 * 24 * 60;
 
     constructor(botName) {
         this.botName = botName;
@@ -103,6 +104,18 @@ class BotControl {
         return this.setValue(item.token, value);
     }
 
+    static async createTemporarySetUrl(valueToken, expiresInMinutes = this.DEFAULT_TEMP_LINK_MINUTES) {
+        return this.postRequest(`/bot/temp_link/${encodeURIComponent(valueToken)}`, {
+            expires_in_minutes: expiresInMinutes
+        });
+    }
+
+    static async createTemporarySetUrlByKey(key, botName = null, expiresInMinutes = this.DEFAULT_TEMP_LINK_MINUTES) {
+        const item = await this.findValue(key, botName);
+        if (!item) return {error: 'Value control not found.', http_code: 404, ok: false};
+        return this.createTemporarySetUrl(item.token, expiresInMinutes);
+    }
+
     static async getBots() {
         const result = await this.request('/bots');
         if (!result.ok) throw Object.assign(new Error(`Unable to load bots (${result.http_code})`), result);
@@ -127,6 +140,25 @@ class BotControl {
             get_value_url: resolve(json.get_value_path),
             user_url: resolve(json.user_path)
         };
+    }
+
+    async generateTemporaryUrl(key, description = '', value = '', expiresInMinutes = this.constructor.DEFAULT_TEMP_LINK_MINUTES) {
+        const generated = await this.generateUrl(key, description, value);
+        if (!generated || generated.http_code >= 400 || !generated.token) return generated;
+
+        const temporary = await this.constructor.createTemporarySetUrl(generated.token, expiresInMinutes);
+        return {
+            ...generated,
+            temporary_url: temporary.url ?? null,
+            temporary_code: temporary.code ?? null,
+            temporary_expires_at: temporary.expires_at ?? null,
+            temporary_http_code: temporary.http_code,
+            temporary_ok: temporary.ok
+        };
+    }
+
+    async generateTempUrl(...args) {
+        return this.generateTemporaryUrl(...args);
     }
 
     static async setValue(token, value) {
