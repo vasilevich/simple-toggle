@@ -116,10 +116,11 @@ const buildValueControl = (req, randomToken) => {
 const valueControlResponse = (req, data) => ({
     key: data.key,
     token: data.token,
+    access_token: data.token,
     url: getBaseUrl(req),
-    set_value_path: `bot/set_value/${data.token}?token=${encodeURIComponent(token)}`,
-    get_value_path: `bot/get_value/${data.token}?token=${encodeURIComponent(token)}`,
-    user_path: `bot_value_set.html?valueToken=${encodeURIComponent(data.token)}&token=${encodeURIComponent(token)}`
+    set_value_path: `v/${data.token}`,
+    get_value_path: `v/${data.token}`,
+    user_path: `bot_value_set.html?valueToken=${encodeURIComponent(data.token)}`
 });
 
 const escapeHtml = value => String(value ?? '')
@@ -175,6 +176,48 @@ app.post('/bot/generate_link', async (req, res) => {
     } catch (err) {
         console.log(err);
         res.status(500).send(err);
+    }
+});
+
+// Permanent per-value access. The long value token itself is the credential.
+// It stays valid until the value control is deleted.
+app.get('/v/:token', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+        const row = await knex('bot_single_value_control').where('token', req.params.token).first();
+        if (!row) return res.status(404).json({error: 'Invalid value access token.'});
+        if ((req.query.onlyvalue || req.query.only_value) === 'true') {
+            res.set('Content-Type', 'text/plain');
+            return res.send(row.value ?? '');
+        }
+        res.json({
+            key: row.key,
+            value: row.value,
+            description: row.description,
+            status: row.status === 1,
+            botName: row.bot_name,
+            updatedAt: row.updated_at,
+            createdAt: row.created_at
+        });
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({error: 'Unable to retrieve value.'});
+    }
+});
+
+app.post('/v/:token', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    try {
+        const updated = await knex('bot_single_value_control').where('token', req.params.token).update({
+            value: req.body?.value ?? '',
+            status: 1,
+            updated_at: new Date()
+        });
+        if (!updated) return res.status(404).json({error: 'Invalid value access token.'});
+        res.json({status: 'success'});
+    } catch (err) {
+        console.log(err);
+        res.status(500).json({error: 'Unable to set value.'});
     }
 });
 
@@ -282,6 +325,7 @@ app.post('/t/:code', async (req, res) => {
     }
 });
 
+// Legacy admin-authenticated value endpoints kept for compatibility.
 app.post('/bot/set_value/:token', async (req, res) => {
     if (!verify_request(req, res)) return;
     try {
@@ -341,6 +385,7 @@ app.get('/bot/values', async (req, res) => {
             description: row.description,
             status: row.status === 1,
             token: row.token,
+            accessToken: row.token,
             botName: row.bot_name,
             updatedAt: row.updated_at,
             createdAt: row.created_at
