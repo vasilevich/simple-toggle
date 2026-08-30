@@ -15,6 +15,7 @@ export interface ValueControl {
     description?: string;
     status?: boolean;
     token: string;
+    accessToken?: string;
     botName?: string;
     bot_name?: string;
     updatedAt?: string;
@@ -56,16 +57,21 @@ export default class BotControl {
     static findValue(key: string, botName?: string | null): Promise<ValueControl | null>;
     static getValueByKey(key: string, defaultValue?: any, botName?: string | null): Promise<any>;
     static setValueByKey(key: string, value: any, botName?: string | null): Promise<ApiResult>;
+    static getPermanentValueUrl(valueToken: string, onlyValue?: boolean): string;
     static createTemporarySetUrl(valueToken: string, expiresInMinutes?: number): Promise<TemporarySetLink>;
     static createTemporarySetUrlByKey(key: string, botName?: string | null, expiresInMinutes?: number): Promise<TemporarySetLink>;
     static getBots(): Promise<BotStatus[]>;
 
     generateUrl(key: string, description?: string, value?: any): Promise<ApiResult & {
+        token?: string;
+        access_token?: string;
+        permanent_access_token?: string;
         set_value_url?: string | null;
         get_value_url?: string | null;
         user_url?: string | null;
     }>;
     generateTemporaryUrl(key: string, description?: string, value?: any, expiresInMinutes?: number): Promise<ApiResult & {
+        permanent_access_token?: string;
         temporary_url?: string | null;
         temporary_code?: string | null;
         temporary_expires_at?: string | null;
