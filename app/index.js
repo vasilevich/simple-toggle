@@ -2,49 +2,33 @@ const config = require('config');
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
-const {createProxyMiddleware} = require("http-proxy-middleware");
+const {createProxyMiddleware} = require('http-proxy-middleware');
 const rtg = require('random-token-generator');
-const {existsSync, unlinkSync, chmodSync} = require("fs");
-const token = config.get('token');  // Replace with your actual static token
-const url = (config.get("url") || `${req.protocol}://${req.hostname}:${config.get('port')}`).replace(/\/+$/, '');
+const {existsSync, unlinkSync, chmodSync} = require('fs');
+const token = config.get('token');
+const configuredUrl = config.has('url') ? config.get('url') : '';
+const getBaseUrl = req => (configuredUrl || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
+
 if (config.get('knex') && config.get('knex').client === 'sqlite3') {
-    //mkdirs and make the db file
     const fs = require('fs');
     const path = require('path');
     const dir = path.dirname(config.get('knex').connection.filename);
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, {recursive: true});
-    }
-    if (!fs.existsSync(config.get('knex').connection.filename)) {
-        fs.writeFileSync(config.get('knex').connection.filename, '');
-    }
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, {recursive: true});
+    if (!fs.existsSync(config.get('knex').connection.filename)) fs.writeFileSync(config.get('knex').connection.filename, '');
 }
-
 
 const knexConfig = config.util.toObject().knex;
-if (knexConfig.client === 'mariadb') {
-    knexConfig.client = require('knex-mariadb');
-}
-
+if (knexConfig.client === 'mariadb') knexConfig.client = require('knex-mariadb');
 const knex = require('knex')(knexConfig);
 
-const generateRandomToken = () => {
-    return new Promise(resolve => {
-        rtg.generateKey({
-            len: 36, // Generate 16 characters or bytes of data
-            string: true, // Output keys as a hex string
-            strong: true, // Use the crypographically secure randomBytes function
-            retry: true // Retry once on error
-        }, function (err, key) {
-            resolve(key);
-        });
-    });
-};
-knex.schema
-    .hasTable('bot_control')
-    .then(function (exists) {
+const generateRandomToken = () => new Promise(resolve => {
+    rtg.generateKey({len: 36, string: true, strong: true, retry: true}, (err, key) => resolve(key));
+});
+
+knex.schema.hasTable('bot_control')
+    .then(exists => {
         if (!exists) {
-            return knex.schema.createTable('bot_control', function (table) {
+            return knex.schema.createTable('bot_control', table => {
                 table.string('bot_name', 255).primary();
                 table.text('title');
                 table.text('description');
@@ -54,12 +38,10 @@ knex.schema
             });
         }
     })
-    .then(() => {
-        return knex.schema.hasTable('bot_single_value_control');
-    })
-    .then(function (exists) {
+    .then(() => knex.schema.hasTable('bot_single_value_control'))
+    .then(exists => {
         if (!exists) {
-            return knex.schema.createTable('bot_single_value_control', function (table) {
+            return knex.schema.createTable('bot_single_value_control', table => {
                 table.text('key');
                 table.text('value');
                 table.text('description');
@@ -71,20 +53,16 @@ knex.schema
             });
         }
     })
-    .catch((err) => console.log(err.message));
+    .catch(err => console.log(err.message));
 
 const app = express();
-
 app.use(express.static('public'));
 app.use(bodyParser.json());
 app.use(cors());
 
 const verify_request = (req, res) => {
     const query_param_token = req.query.token;
-
-    if (query_param_token && query_param_token === token) {
-        return true;
-    }
+    if (query_param_token && query_param_token === token) return true;
 
     const authHeader = req.headers.authorization;
     if (!authHeader) {
@@ -93,262 +71,212 @@ const verify_request = (req, res) => {
     }
 
     const authParts = authHeader.split(' ');
-    if (authParts.length != 2 || authParts[0].toLowerCase() != 'bearer') {
+    if (authParts.length !== 2 || authParts[0].toLowerCase() !== 'bearer') {
         res.status(401).send('Invalid authorization format');
         return false;
     }
 
-    let providedToken = authParts[1];
-    if (providedToken != token) {
+    if (authParts[1] !== token) {
         res.status(401).send('Invalid token');
         return false;
     }
     return true;
 };
 
+const buildValueControl = (req, randomToken) => {
+    const now = new Date();
+    return {
+        key: req.body?.key ?? req.query.key,
+        description: req.body?.description ?? req.query.description ?? '',
+        value: req.body?.value ?? req.query.value ?? '',
+        status: 0,
+        token: randomToken,
+        bot_name: req.body?.bot_name ?? req.query.bot_name ?? 'none',
+        updated_at: now,
+        created_at: now
+    };
+};
+
+const valueControlResponse = (req, data) => ({
+    key: data.key,
+    token: data.token,
+    url: getBaseUrl(req),
+    set_value_path: `bot/set_value/${data.token}?token=${encodeURIComponent(token)}`,
+    get_value_path: `bot/get_value/${data.token}?token=${encodeURIComponent(token)}`,
+    user_path: `bot_value_set.html?valueToken=${encodeURIComponent(data.token)}&token=${encodeURIComponent(token)}`
+});
 
 app.get('/bot/generate_link', async (req, res) => {
-    if (verify_request(req, res)) {
-        try {
-            // generate random token for the URL
-            const randomToken = await generateRandomToken();
-            const now = new Date();
-            const data = {
-                key: req.query.key,
-                description: req.query.description || '',
-                value: req.query.value || "",
-                status: 0,
-                token: randomToken,
-                bot_name: req.query.bot_name || 'none',
-                updated_at: now,
-                created_at: now,
-            };
-
-            // insert a new row into the bot_single_value_control table
-            await knex('bot_single_value_control').insert(data);
-            res.json({
-                key: req.query.key,
-                token: randomToken,
-                url: url,
-                set_value_path: `bot/set_value/${randomToken}&token=${token}`,
-                get_value_path: `bot/get_value/${randomToken}&token=${token}`,
-                user_path: `bot_value_set.html?valueToken=${randomToken}&token=${token}`
-            });
-        } catch (err) {
-            console.log(err);
-            return res.status(500).send(err);
-        }
+    if (!verify_request(req, res)) return;
+    try {
+        const randomToken = await generateRandomToken();
+        const data = buildValueControl(req, randomToken);
+        await knex('bot_single_value_control').insert(data);
+        res.json(valueControlResponse(req, data));
+    } catch (err) {
+        console.log(err);
+        res.status(500).send(err);
     }
 });
 
-
 app.post('/bot/generate_link', async (req, res) => {
-    if (verify_request(req, res)) {
-        try {
-            // generate random token for the URL
-            const randomToken = await generateRandomToken();
-            const now = new Date();
-            const data = {
-                key: req.body.key,
-                description: req.body.description || req.query.description || '',
-                value: req.body.value || req.query.value || "",
-                status: 0,
-                token: randomToken,
-                bot_name: req.body.bot_name || req.query.bot_name || 'none',
-                updated_at: now,
-                created_at: now,
-            };
-
-            // insert a new row into the bot_single_value_control table
-            await knex('bot_single_value_control').insert(data);
-
-            res.json({
-                key: req.query.key,
-                token: randomToken,
-                url: url,
-                set_value_path: `bot/set_value/${randomToken}&token=${token}`,
-                get_value_path: `bot/get_value/${randomToken}&token=${token}`,
-                user_path: `bot_value_set.html?valueToken=${randomToken}&token=${token}`
-            });
-        } catch (err) {
-            console.log(err);
-            return res.status(500).send(err);
-        }
+    if (!verify_request(req, res)) return;
+    try {
+        const randomToken = await generateRandomToken();
+        const data = buildValueControl(req, randomToken);
+        await knex('bot_single_value_control').insert(data);
+        res.json(valueControlResponse(req, data));
+    } catch (err) {
+        console.log(err);
+        res.status(500).send(err);
     }
 });
 
 app.post('/bot/set_value/:token', async (req, res) => {
-    if (verify_request(req, res)) {
-        const token = req.params.token;
-        const value = req.body.value;
-
-        try {
-            const now = new Date();
-            const row = await knex('bot_single_value_control').where('token', token).first();
-
-            if (row) {
-                const result = await knex('bot_single_value_control').where('token', token).update({
-                    value: value,
-                    status: 1,
-                    updated_at: now
-                });
-
-                return res.json({status: "success"});
-            } else {
-                return res.status(404).send({error: 'Invalid token.'});
-            }
-        } catch (err) {
-            console.log(err);
-            return res.status(500).send(err);
-        }
+    if (!verify_request(req, res)) return;
+    try {
+        const row = await knex('bot_single_value_control').where('token', req.params.token).first();
+        if (!row) return res.status(404).send({error: 'Invalid token.'});
+        await knex('bot_single_value_control').where('token', req.params.token).update({
+            value: req.body.value,
+            status: 1,
+            updated_at: new Date()
+        });
+        res.json({status: 'success'});
+    } catch (err) {
+        console.log(err);
+        res.status(500).send(err);
     }
 });
 
 app.delete('/bot/delete_value/:token', async (req, res) => {
-    if (verify_request(req, res)) {
-        const token = req.params.token;
-
-        try {
-            const row = await knex('bot_single_value_control').where('token', token).first();
-            if (row) {
-                await knex('bot_single_value_control').where('token', token).del();
-
-                return res.json({success: 'Value deleted successfully.'});
-            } else {
-                return res.status(404).send({error: 'Invalid token.'});
-            }
-        } catch (err) {
-            console.log(err);
-            return res.status(500).send(err);
-        }
+    if (!verify_request(req, res)) return;
+    try {
+        const row = await knex('bot_single_value_control').where('token', req.params.token).first();
+        if (!row) return res.status(404).send({error: 'Invalid token.'});
+        await knex('bot_single_value_control').where('token', req.params.token).del();
+        res.json({success: 'Value deleted successfully.'});
+    } catch (err) {
+        console.log(err);
+        res.status(500).send(err);
     }
 });
-
 
 app.get('/bot/get_value/:token', async (req, res) => {
-    if (verify_request(req, res)) {
-        const token = req.params.token;
-        const isOnlyValue = (req.query.onlyvalue || req.query.only_value) === 'true';
-        try {
-            const row = await knex('bot_single_value_control').where('token', token).first();
-
-            if (row) {
-                if (isOnlyValue) {
-                    // set content type to text/plain
-                    res.set('Content-Type', 'text/plain');
-                    return res.send(row.value);
-                } else {
-                    return res.json(row);
-                }
-            } else {
-                return res.status(404).send({error: 'Invalid token.'});
-            }
-        } catch (err) {
-            console.log(err);
-            return res.status(500).send(err);
+    if (!verify_request(req, res)) return;
+    try {
+        const row = await knex('bot_single_value_control').where('token', req.params.token).first();
+        if (!row) return res.status(404).send({error: 'Invalid token.'});
+        if ((req.query.onlyvalue || req.query.only_value) === 'true') {
+            res.set('Content-Type', 'text/plain');
+            return res.send(row.value);
         }
+        res.json(row);
+    } catch (err) {
+        console.log(err);
+        res.status(500).send(err);
     }
 });
 
+app.get('/bot/values', async (req, res) => {
+    if (!verify_request(req, res)) return;
+    try {
+        const rows = await knex.select('*').from('bot_single_value_control').orderBy('created_at', 'desc');
+        res.json(rows.map(row => ({
+            key: row.key,
+            value: row.value,
+            description: row.description,
+            status: row.status === 1,
+            token: row.token,
+            botName: row.bot_name,
+            updatedAt: row.updated_at,
+            createdAt: row.created_at
+        })));
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send({error: 'Unable to retrieve value controls.'});
+    }
+});
 
-// get all the bot statuses
 app.get('/bots', async (req, res) => {
-    if (verify_request(req, res)) {
-        try {
-            const rows = await knex.select('*').from('bot_control');
-            res.json(rows.map(row => ({
-                botName: row.bot_name,
-                title: row.title,
-                description: row.description,
-                status: row.status === 1
-            })));
-        } catch (err) {
-            console.error(err.message);
-        }
+    if (!verify_request(req, res)) return;
+    try {
+        const rows = await knex.select('*').from('bot_control').orderBy('bot_name');
+        res.json(rows.map(row => ({
+            botName: row.bot_name,
+            title: row.title,
+            description: row.description,
+            status: row.status === 1
+        })));
+    } catch (err) {
+        console.error(err.message);
+        res.status(500).send({error: 'Unable to retrieve bot controls.'});
     }
 });
 
-// get specific bot status
 app.get('/bot/:botName', async (req, res) => {
-    if (verify_request(req, res)) {
-        try {
-            const botName = req.params.botName;
-            const row = await knex('bot_control').where('bot_name', botName).first();
-            if (row) {
-                return res.json({botName: row.bot_name, status: Boolean(row.status)});
-            } else {
-                return res.status(404).send({code: 404, error: 'Bot not found.'});
-            }
-        } catch (err) {
-            return res.status(500).send({error: 'An error occurred while retrieving bot status.'});
-        }
+    if (!verify_request(req, res)) return;
+    try {
+        const row = await knex('bot_control').where('bot_name', req.params.botName).first();
+        if (!row) return res.status(404).send({code: 404, error: 'Bot not found.'});
+        res.json({botName: row.bot_name, status: Boolean(row.status)});
+    } catch (err) {
+        res.status(500).send({error: 'An error occurred while retrieving bot status.'});
     }
 });
 
-// modify bot status
 app.post('/bot/:bot_name', async (req, res) => {
-    if (verify_request(req, res)) {
-        try {
-            const botName = req.params.bot_name;
-            const data = {
-                bot_name: botName,
-                title: req.body.title,
-                description: req.body.description,
-                status: req.body.status ? 1 : 0
-            };
-
-            const row = await knex('bot_control').where('bot_name', botName).first();
-
-            if (row) {
-                await knex('bot_control').where('bot_name', botName).update({status: data.status});
-            } else {
-                await knex('bot_control').insert(data);
-            }
-
-            res.json({status: req.body.status ? true : false});
-
-        } catch (err) {
-            console.log(err);
-            return res.status(500).send(err);
+    if (!verify_request(req, res)) return;
+    try {
+        const botName = req.params.bot_name;
+        const data = {
+            bot_name: botName,
+            title: req.body.title,
+            description: req.body.description,
+            status: req.body.status ? 1 : 0,
+            updated_at: new Date()
+        };
+        const row = await knex('bot_control').where('bot_name', botName).first();
+        if (row) {
+            const update = {status: data.status, updated_at: data.updated_at};
+            if (req.body.title !== undefined) update.title = req.body.title;
+            if (req.body.description !== undefined) update.description = req.body.description;
+            await knex('bot_control').where('bot_name', botName).update(update);
+        } else {
+            data.created_at = new Date();
+            await knex('bot_control').insert(data);
         }
+        res.json({status: Boolean(data.status)});
+    } catch (err) {
+        console.log(err);
+        res.status(500).send(err);
     }
 });
 
-// delete bot
 app.delete('/bot/:bot_name', async (req, res) => {
-    if (verify_request(req, res)) {
-        try {
-            await knex('bot_control').where('bot_name', req.params.bot_name).del();
-            res.json({status: 'success'});
-        } catch (err) {
-            console.log(err);
-            return res.status(500).send(err);
-        }
+    if (!verify_request(req, res)) return;
+    try {
+        await knex('bot_control').where('bot_name', req.params.bot_name).del();
+        res.json({status: 'success'});
+    } catch (err) {
+        console.log(err);
+        res.status(500).send(err);
     }
 });
 
-const wsProxy = createProxyMiddleware({
-    target: 'http://kuma',
-    changeOrigin: true,
-    ws: true,
-    logger: console,
-});
+const wsProxy = createProxyMiddleware({target: 'http://kuma', changeOrigin: true, ws: true, logger: console});
 app.use(wsProxy);
 app.on('upgrade', wsProxy.upgrade);
-
 app.use('/dashboard', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
 app.use('/assets', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
 app.use('/manifest.json', createProxyMiddleware({target: 'http://kuma', ws: true, changeOrigin: true}));
-
 
 const port = config.get('port');
 const hostname = config.get('hostname');
 const unixPath = config.has('unixPath') ? config.get('unixPath') : null;
 
 if (unixPath) {
-    if (existsSync(unixPath)) {
-        unlinkSync(unixPath);
-    }
+    if (existsSync(unixPath)) unlinkSync(unixPath);
     app.listen(unixPath, () => {
         console.log(`Server running on unix socket at ${unixPath}`);
         chmodSync(unixPath, '777');
@@ -356,12 +284,7 @@ if (unixPath) {
 }
 
 if (port && hostname) {
-    app.listen(port, hostname, () => {
-        console.log(`Server running on port ${port}`);
-    });
+    app.listen(port, hostname, () => console.log(`Server running on port ${port}`));
 } else if (port) {
-    app.listen(port, () => {
-        console.log(`Server running on port ${port}`);
-    });
+    app.listen(port, () => console.log(`Server running on port ${port}`));
 }
-
