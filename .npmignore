@@ -1,0 +1,52 @@
+# Server/runtime source is not part of the reusable npm client
+app/
+config/
+public/
+data/
+greenlock.d/
+
+# Repository / IDE metadata
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+*.code-workspace
+
+# Local configuration / secrets
+.env
+.env.*
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Runtime / database files
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Logs / caches / test output
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+coverage/
+.nyc_output/
+dist/
+build/
+tmp/
+.temp/
+
+# Development lockfiles / OS clutter
+yarn.lock
+package-lock.json
+pnpm-lock.yaml
+.DS_Store
+Thumbs.db
+Desktop.ini
