@@ -142,8 +142,8 @@
             </div>
             <div class="card-actions">
                 <button class="button button-primary button-small temp-url" type="button" title="Creates a short one-use link, valid for 7 days">One-time link</button>
-                <a class="button button-secondary button-small open-value" target="_blank" rel="noopener">Open page</a>
-                <button class="button button-secondary button-small copy-url" type="button">Copy API URL</button>
+                <a class="button button-secondary button-small open-value" target="_blank" rel="noopener">Open permanent page</a>
+                <button class="button button-secondary button-small copy-url" type="button">Copy permanent URL</button>
                 <button class="button button-danger button-small delete-value" type="button">Delete</button>
             </div>
         `;
@@ -154,8 +154,8 @@
         const input = card.querySelector('.value-input');
         input.value = item.value ?? '';
 
-        const pageUrl = `/bot_value_set.html?valueToken=${encodeURIComponent(item.token)}&token=${encodeURIComponent(token)}`;
-        const apiUrl = `${location.origin}/bot/get_value/${encodeURIComponent(item.token)}?token=${encodeURIComponent(token)}&only_value=true`;
+        const pageUrl = `/bot_value_set.html?valueToken=${encodeURIComponent(item.token)}`;
+        const apiUrl = `${location.origin}/v/${encodeURIComponent(item.token)}?only_value=true`;
         card.querySelector('.open-value').href = pageUrl;
 
         const save = card.querySelector('.save-value');
@@ -196,9 +196,9 @@
         });
 
         card.querySelector('.copy-url').addEventListener('click', async event => {
-            await copyText(apiUrl);
+            await copyText(apiUrl, 'Copy this permanent value URL:');
             event.currentTarget.textContent = 'Copied';
-            setTimeout(() => event.currentTarget.textContent = 'Copy API URL', 900);
+            setTimeout(() => event.currentTarget.textContent = 'Copy permanent URL', 900);
         });
 
         const remove = card.querySelector('.delete-value');
