@@ -50,6 +50,16 @@
         return type.includes('application/json') ? response.json() : response.text();
     }
 
+    async function copyText(text, fallbackMessage = 'Copy this URL:') {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch {
+            prompt(fallbackMessage, text);
+            return false;
+        }
+    }
+
     function setCount(id, count) {
         document.getElementById(id).textContent = String(count);
     }
@@ -131,6 +141,7 @@
                 <button class="button button-primary button-small save-value" type="button">Save</button>
             </div>
             <div class="card-actions">
+                <button class="button button-primary button-small temp-url" type="button" title="Creates a short one-use link, valid for 7 days">One-time link</button>
                 <a class="button button-secondary button-small open-value" target="_blank" rel="noopener">Open page</a>
                 <button class="button button-secondary button-small copy-url" type="button">Copy API URL</button>
                 <button class="button button-danger button-small delete-value" type="button">Delete</button>
@@ -165,14 +176,29 @@
             }
         });
 
-        card.querySelector('.copy-url').addEventListener('click', async event => {
+        const tempLink = card.querySelector('.temp-url');
+        tempLink.addEventListener('click', async () => {
+            tempLink.disabled = true;
+            clearError();
             try {
-                await navigator.clipboard.writeText(apiUrl);
-                event.currentTarget.textContent = 'Copied';
-                setTimeout(() => event.currentTarget.textContent = 'Copy API URL', 900);
-            } catch {
-                prompt('Copy this URL:', apiUrl);
+                const result = await api(`/bot/temp_link/${encodeURIComponent(item.token)}`, {
+                    method: 'POST',
+                    body: JSON.stringify({expires_in_minutes: 7 * 24 * 60})
+                });
+                await copyText(result.url, 'Copy this one-time URL:');
+                tempLink.textContent = 'Copied one-time link';
+                setTimeout(() => tempLink.textContent = 'One-time link', 1400);
+            } catch (err) {
+                if (err.message !== 'Unauthorized') showError(err.message);
+            } finally {
+                tempLink.disabled = false;
             }
+        });
+
+        card.querySelector('.copy-url').addEventListener('click', async event => {
+            await copyText(apiUrl);
+            event.currentTarget.textContent = 'Copied';
+            setTimeout(() => event.currentTarget.textContent = 'Copy API URL', 900);
         });
 
         const remove = card.querySelector('.delete-value');
