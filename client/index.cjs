@@ -104,6 +104,11 @@ class BotControl {
         return this.setValue(item.token, value);
     }
 
+    static getPermanentValueUrl(valueToken, onlyValue = false) {
+        const suffix = onlyValue ? '?only_value=true' : '';
+        return this.buildUrl(`/v/${encodeURIComponent(valueToken)}${suffix}`);
+    }
+
     static async createTemporarySetUrl(valueToken, expiresInMinutes = this.DEFAULT_TEMP_LINK_MINUTES) {
         return this.postRequest(`/bot/temp_link/${encodeURIComponent(valueToken)}`, {
             expires_in_minutes: expiresInMinutes
@@ -136,6 +141,7 @@ class BotControl {
         const resolve = path => path ? new URL(path, base).toString() : null;
         return {
             ...json,
+            permanent_access_token: json.access_token || json.token,
             set_value_url: resolve(json.set_value_path),
             get_value_url: resolve(json.get_value_path),
             user_url: resolve(json.user_path)
@@ -162,11 +168,11 @@ class BotControl {
     }
 
     static async setValue(token, value) {
-        return this.postRequest(`/bot/set_value/${encodeURIComponent(token)}`, {value});
+        return this.postRequest(`/v/${encodeURIComponent(token)}`, {value});
     }
 
     static async getValue(token) {
-        return this.getRequest(`/bot/get_value/${encodeURIComponent(token)}`);
+        return this.getRequest(`/v/${encodeURIComponent(token)}`);
     }
 
     static async getValueOnlyValue(token, defaultValue = null) {
