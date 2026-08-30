@@ -133,7 +133,7 @@
             <div class="card-actions">
                 <a class="button button-secondary button-small open-value" target="_blank" rel="noopener">Open page</a>
                 <button class="button button-secondary button-small copy-url" type="button">Copy API URL</button>
-                <button class="button button-danger button-small delete-value admin-only" type="button">Delete</button>
+                <button class="button button-danger button-small delete-value" type="button">Delete</button>
             </div>
         `;
 
@@ -176,9 +176,8 @@
         });
 
         const remove = card.querySelector('.delete-value');
-        remove.hidden = !isAdmin;
         remove.addEventListener('click', async () => {
-            if (!confirm(`Delete value control ${item.key}?`)) return;
+            if (!confirm(`Delete value control ${item.key || '(unnamed)'}?`)) return;
             remove.disabled = true;
             try {
                 await api(`/bot/delete_value/${encodeURIComponent(item.token)}`, {method: 'DELETE'});
