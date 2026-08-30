@@ -1,6 +1,20 @@
 {
   "name": "bots-status-manager",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "description": "Simple remote toggle and value control server with a reusable Node.js client.",
+  "main": "./client/index.cjs",
+  "module": "./client/index.mjs",
+  "types": "./client/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./client/index.d.ts",
+      "import": "./client/index.mjs",
+      "require": "./client/index.cjs"
+    }
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/vasilevich/simple-toggle"
