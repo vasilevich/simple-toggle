@@ -250,10 +250,8 @@
         });
     }
 
-    if (isAdmin) {
-        bindModal('create-toggle-modal', 'open-create-toggle');
-        bindModal('create-value-modal', 'open-create-value');
-    }
+    bindModal('create-toggle-modal', 'open-create-toggle');
+    bindModal('create-value-modal', 'open-create-value');
 
     document.getElementById('create-toggle-form').addEventListener('submit', async event => {
         event.preventDefault();
