@@ -1,10 +1,9 @@
 (() => {
     const params = new URLSearchParams(location.search);
-    const token = params.get('token');
     const valueToken = params.get('valueToken');
     const message = document.getElementById('page-message');
     const saveButton = document.getElementById('save-button');
-    const valueUrl = `${location.origin}/bot/get_value/${encodeURIComponent(valueToken || '')}?token=${encodeURIComponent(token || '')}&only_value=true`;
+    const valueUrl = valueToken ? `${location.origin}/v/${encodeURIComponent(valueToken)}?only_value=true` : '';
     document.getElementById('value-url').value = valueUrl;
 
     function showMessage(text, success = false) {
@@ -17,7 +16,6 @@
         const response = await fetch(path, {
             ...options,
             headers: {
-                'Authorization': `Bearer ${token || ''}`,
                 ...(options.body ? {'Content-Type': 'application/json'} : {}),
                 ...(options.headers || {})
             }
@@ -27,13 +25,13 @@
         return type.includes('application/json') ? response.json() : response.text();
     }
 
-    if (!token || !valueToken) {
-        showMessage('Missing token or valueToken in the URL.');
+    if (!valueToken) {
+        showMessage('Missing valueToken in the URL.');
         saveButton.disabled = true;
         return;
     }
 
-    request(`/bot/get_value/${encodeURIComponent(valueToken)}`)
+    request(`/v/${encodeURIComponent(valueToken)}`)
         .then(data => {
             document.getElementById('key').textContent = data.key || '(unnamed)';
             document.getElementById('description').textContent = data.description || 'No description';
@@ -48,7 +46,7 @@
         event.preventDefault();
         saveButton.disabled = true;
         try {
-            await request(`/bot/set_value/${encodeURIComponent(valueToken)}`, {
+            await request(`/v/${encodeURIComponent(valueToken)}`, {
                 method: 'POST',
                 body: JSON.stringify({value: document.getElementById('value').value})
             });
