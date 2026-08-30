@@ -1,42 +1,33 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Bot Value Set</title>
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+    <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Simple Toggle · Value</title>
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<div class="container">
-    <div class="row">
-        <div class="col-12">
-            <h1 class="text-center my-5">Set Value for key '<span id="key"></span>'</h1>
-            <div class="card">
-                <div class="card-body">
-                    <form id="value-form">
-                        <div id="description">
-                        </div>
-                        <div class="form-group">
-                            <label for="value">Value:</label>
-                            <input type="text" id="value" class="form-control">
-                        </div>
-                        <button type="submit" class="btn btn-primary">Submit</button>
-                    </form>
-                </div>
-            </div>
-            <div id="success-message" class="alert alert-success mt-3 d-none">
-                set successfully!
-            </div>
-            <div class="alert alert-info mt-3">
-                value URL:
-                <a id="value-url" href="">
-
-                </a>
+<main class="login-shell">
+    <section class="login-card value-page-card">
+        <div class="eyebrow">VALUE CONTROL</div>
+        <h1 id="key">Loading…</h1>
+        <p id="description">Loading value control…</p>
+        <form id="value-form">
+            <label>Value<input type="text" id="value" autocomplete="off"></label>
+            <button id="save-button" type="submit" class="button button-primary">Save value</button>
+        </form>
+        <div id="page-message" class="alert" hidden></div>
+        <div class="value-link-block">
+            <span>Raw value URL</span>
+            <div class="value-row">
+                <input id="value-url" readonly>
+                <button id="copy-value-url" class="button button-secondary button-small" type="button">Copy</button>
             </div>
         </div>
-    </div>
-</div>
-
-<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+        <a class="button button-secondary back-link" href="/">Back to dashboard</a>
+    </section>
+</main>
 <script src="js/bot_value_set.js"></script>
 </body>
 </html>
