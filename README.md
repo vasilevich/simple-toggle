@@ -58,6 +58,37 @@ await BotControl.setValue(valueToken, 'new value');
 await BotControl.deleteValue(valueToken);
 ```
 
+### Short one-time setter links
+
+Create a short public URL for an existing value control. The URL contains no admin token, can be submitted once, and is invalidated immediately after a successful set. It expires after 7 days by default.
+
+```js
+const link = await BotControl.createTemporarySetUrl(valueToken);
+console.log(link.url); // https://toggle.example.com/t/aB93xK7q
+```
+
+Or locate the value by key:
+
+```js
+const link = await BotControl.createTemporarySetUrlByKey('customer_reply');
+```
+
+Pass `0` to disable the time expiry while keeping the link single-use:
+
+```js
+const link = await BotControl.createTemporarySetUrl(valueToken, 0);
+```
+
+You can also create a brand-new value control and its temporary link in one call:
+
+```js
+const crm = new BotControl('crm');
+const link = await crm.generateTemporaryUrl('customer_reply', 'Reply from customer');
+console.log(link.temporary_url);
+```
+
+The web UI exposes the same feature with the **One-time link** button on every Value card.
+
 ### Toggles
 
 ```js
