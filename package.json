@@ -5,12 +5,18 @@
   "main": "./client/index.cjs",
   "module": "./client/index.mjs",
   "types": "./client/index.d.ts",
+  "files": [
+    "client/"
+  ],
   "exports": {
     ".": {
       "types": "./client/index.d.ts",
       "import": "./client/index.mjs",
       "require": "./client/index.cjs"
     }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "engines": {
     "node": ">=18"
