@@ -43,6 +43,39 @@ function showErrorModal(message) {
     $("#errorModal").modal("show");
 }
 
+function showTokenPrompt(message = '') {
+    $('body').html(`
+        <div class="container d-flex justify-content-center align-items-center" style="min-height: 100vh">
+            <div class="card" style="width: 100%; max-width: 420px">
+                <div class="card-body">
+                    <h5 class="card-title">Authentication required</h5>
+                    <p class="card-text">Enter the access token to continue.</p>
+                    ${message ? `<div class="alert alert-danger">${message}</div>` : ''}
+                    <form id="token-form">
+                        <div class="form-group">
+                            <input id="token-input" type="password" class="form-control" placeholder="Token" autocomplete="current-password" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-block">Continue</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    `);
+
+    $('#token-form').on('submit', function (event) {
+        event.preventDefault();
+        const token = $('#token-input').val().trim();
+        if (!token) return;
+
+        const params = new URLSearchParams(window.location.search);
+        params.set('token', token);
+        if (!params.has('admin_mode')) params.set('admin_mode', 'false');
+        window.location.replace(`${window.location.pathname}?${params.toString()}${window.location.hash}`);
+    });
+
+    $('#token-input').focus();
+}
+
 function applyAdminMode() {
     jQuery('.admin-mode').removeClass('d-none');
 }
@@ -51,11 +84,17 @@ $(document).ready(function () {
     let urlParams = new URLSearchParams(window.location.search);
     let adminMode = urlParams.get('admin_mode');
     let token = urlParams.get('token');
+
+    if (!token) {
+        showTokenPrompt();
+        return;
+    }
+
     // if admin mode is not set
     if (adminMode === null || adminMode === undefined) {
         urlParams.set('admin_mode', false); // set adminMode to the url
-        // set adminMode to the url
-        location.href = location.href.split('?')[0] + '?' + urlParams.toString();
+        window.location.replace(location.href.split('?')[0] + '?' + urlParams.toString());
+        return;
     }
 
     const isAdminModeSet = adminMode === 'true';
@@ -66,8 +105,12 @@ $(document).ready(function () {
             xhr.setRequestHeader('Authorization', 'Bearer ' + token);
         },
         error: function (jqXHR, textStatus, errorThrown) {
+            if (jqXHR.status === 401) {
+                showTokenPrompt('That token was rejected.');
+                return;
+            }
             if (!$("#errorModal").hasClass('show')) {
-                showErrorModal("An error occurred during the request. Please provide a valid token.");
+                showErrorModal("An error occurred during the request.");
             }
         }
     });
