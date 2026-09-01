@@ -1,6 +1,6 @@
 const TABLE = 'bot_condition_mapper';
 
-module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl}) => {
+module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, history = null}) => {
     const schemaReady = (async () => {
         if (await knex.schema.hasTable(TABLE)) return;
         await knex.schema.createTable(TABLE, table => {
@@ -204,6 +204,7 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl}) 
                 created_at: now
             };
             await knex(TABLE).insert(row);
+            if (history) await history.record('mapper', row.token, 'create', null, row, 'api');
             res.status(201).json(serializeRow(req, row));
         } catch (err) {
             console.error(err);
@@ -233,6 +234,7 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl}) 
             const update = mapperUpdate(req.body || {});
             await knex(TABLE).where('token', req.params.token).update(update);
             const row = {...existing, ...update};
+            if (history) await history.record('mapper', req.params.token, 'update', existing, row, 'api');
             res.json(serializeRow(req, row));
         } catch (err) {
             console.error(err);
@@ -246,8 +248,12 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl}) 
         if (!verify_request(req, res)) return;
         try {
             await schemaReady;
-            const deleted = await knex(TABLE).where('token', req.params.token).del();
-            if (!deleted) return res.status(404).json({error: 'Condition mapper not found.'});
+            const existing = await knex(TABLE).where('token', req.params.token).first();
+            if (!existing) return res.status(404).json({error: 'Condition mapper not found.'});
+            await knex.transaction(async trx => {
+                await trx(TABLE).where('token', req.params.token).del();
+                if (history) await history.record('mapper', req.params.token, 'delete', existing, null, 'api', trx);
+            });
             res.json({status: 'success'});
         } catch (err) {
             console.error(err);
@@ -281,9 +287,7 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl}) 
             if (!isPlainObject(input)) return res.status(400).json({error: 'Input must be a JSON object.'});
             const match = evaluateRules(normalizeRules(parseJson(row.rules_json, [])), input);
             const result = req.query.merge === 'true' ? {...input, ...match.result} : match.result;
-            if (req.query.meta === 'true') {
-                return res.json({matched: match.matched, ruleIndex: match.ruleIndex, ruleName: match.rule?.name || '', result});
-            }
+            if (req.query.meta === 'true') return res.json({matched: match.matched, ruleIndex: match.ruleIndex, ruleName: match.rule?.name || '', result});
             res.json(result);
         } catch (err) {
             console.error(err);
@@ -291,5 +295,5 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl}) 
         }
     });
 
-    return {schemaReady, evaluateRules, normalizeRules};
+    return {schemaReady, evaluateRules, normalizeRules, normalizeExample, serializeRow};
 };
