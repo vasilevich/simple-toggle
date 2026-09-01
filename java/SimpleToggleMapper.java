@@ -19,7 +19,10 @@ import java.util.Map;
  *
  * Typical usage:
  *
- *   SimpleToggleMapper simpleToggle = new SimpleToggleMapper("https://toggle.example.com");
+ *   SimpleToggleMapper simpleToggle = new SimpleToggleMapper(
+ *       "https://toggle.example.com",
+ *       System.getenv("SIMPLE_TOGGLE_TOKEN")
+ *   );
  *   SimpleToggleMapper.MapperDefinition mapper = simpleToggle.getMapper("kish-orders-coupons");
  *
  *   // Fetch happens once. Reuse this object for every row.
@@ -28,16 +31,29 @@ import java.util.Map;
  *
  * getMapper(key) is cached in memory. Call refreshMapper(key) when you want a conditional
  * HTTP revalidation; Simple Toggle supplies ETag/Last-Modified headers and returns 304 when unchanged.
+ * Key-based mapper lookup uses the normal Simple Toggle Bearer token. Fetching by permanent mapper
+ * token uses that mapper token as the credential and does not require the global admin token.
  */
 public class SimpleToggleMapper {
     private final String baseUrl;
+    private final String apiToken;
     private final Map<String, MapperDefinition> cache = new LinkedHashMap<String, MapperDefinition>();
     private int connectTimeoutMs = 10000;
     private int readTimeoutMs = 30000;
 
+    /**
+     * Creates a client without the global admin token. This can still use getMapperByToken(),
+     * because the permanent mapper token is itself a credential.
+     */
     public SimpleToggleMapper(String baseUrl) {
+        this(baseUrl, null);
+    }
+
+    /** Creates a client that can fetch mapper definitions by key using the normal admin Bearer token. */
+    public SimpleToggleMapper(String baseUrl, String apiToken) {
         if (baseUrl == null || baseUrl.trim().isEmpty()) throw new IllegalArgumentException("baseUrl is required");
         this.baseUrl = baseUrl.replaceAll("/+$", "");
+        this.apiToken = apiToken == null ? null : apiToken.trim();
     }
 
     public SimpleToggleMapper setTimeouts(int connectTimeoutMs, int readTimeoutMs) {
@@ -46,7 +62,9 @@ public class SimpleToggleMapper {
         return this;
     }
 
-    /** Returns the cached mapper, fetching it only when absent. */
+    public boolean hasAdminToken() { return apiToken != null && !apiToken.isEmpty(); }
+
+    /** Returns the cached mapper, fetching it only when absent. Requires the admin token. */
     public synchronized MapperDefinition getMapper(String key) throws IOException {
         MapperDefinition cached = cache.get(key);
         if (cached != null) return cached;
@@ -56,33 +74,36 @@ public class SimpleToggleMapper {
     /**
      * Revalidates the mapper over HTTP. If the server returns 304, the same cached instance is returned.
      * Use this on your own schedule (for example once per batch, every few minutes, etc.).
+     * Requires the normal Simple Toggle admin token supplied to the constructor.
      */
     public synchronized MapperDefinition refreshMapper(String key) throws IOException {
         if (key == null || key.trim().isEmpty()) throw new IllegalArgumentException("key is required");
+        if (!hasAdminToken()) throw new IllegalStateException("Simple Toggle admin token is required for getMapper/refreshMapper by key. Use new SimpleToggleMapper(baseUrl, token).");
         MapperDefinition cached = cache.get(key);
         String encoded = URLEncoder.encode(key, "UTF-8").replace("+", "%20");
-        MapperDefinition fresh = fetch(baseUrl + "/m/key/" + encoded, cached);
+        MapperDefinition fresh = fetch(baseUrl + "/m/key/" + encoded, cached, true);
         if (fresh != null) cache.put(key, fresh);
         return fresh != null ? fresh : cached;
     }
 
-    /** Fetches a mapper by permanent mapper token. This does not share the key cache. */
+    /** Fetches a mapper by permanent mapper token. This does not require the global admin token. */
     public MapperDefinition getMapperByToken(String token) throws IOException {
         if (token == null || token.trim().isEmpty()) throw new IllegalArgumentException("token is required");
         String encoded = URLEncoder.encode(token, "UTF-8").replace("+", "%20");
-        return fetch(baseUrl + "/m/" + encoded, null);
+        return fetch(baseUrl + "/m/" + encoded, null, false);
     }
 
     public synchronized void invalidate(String key) { cache.remove(key); }
     public synchronized void clearCache() { cache.clear(); }
 
-    private MapperDefinition fetch(String url, MapperDefinition cached) throws IOException {
+    private MapperDefinition fetch(String url, MapperDefinition cached, boolean useAdminToken) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
         connection.setRequestMethod("GET");
         connection.setConnectTimeout(connectTimeoutMs);
         connection.setReadTimeout(readTimeoutMs);
         connection.setRequestProperty("Accept", "application/json");
-        connection.setRequestProperty("User-Agent", "simple-toggle-java8/1.0");
+        connection.setRequestProperty("User-Agent", "simple-toggle-java8/1.1");
+        if (useAdminToken) connection.setRequestProperty("Authorization", "Bearer " + apiToken);
         if (cached != null && cached.etag != null) connection.setRequestProperty("If-None-Match", cached.etag);
 
         int status = connection.getResponseCode();
@@ -183,7 +204,6 @@ public class SimpleToggleMapper {
                 if (actionsObject instanceof List) {
                     for (Object action : (List<Object>) actionsObject) if (action instanceof Map) applyAction((Map<String, Object>) action, working, changes, unsetFields);
                 } else {
-                    // Backward compatibility with old {result:{...}} mapper rules.
                     Object resultObject = rule.get("result");
                     if (resultObject instanceof Map) {
                         for (Map.Entry<String, Object> entry : ((Map<String, Object>) resultObject).entrySet()) {
@@ -467,7 +487,6 @@ public class SimpleToggleMapper {
 
     private static String string(Object value) { return value == null ? "" : String.valueOf(value); }
 
-    /** Tiny JSON parser so this file has zero third-party dependencies on Java 8. */
     private static final class Json {
         static Object parse(String json) throws IOException { return new Parser(json).parse(); }
 
