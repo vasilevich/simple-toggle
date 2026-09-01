@@ -5,6 +5,7 @@
     const saveButton = document.getElementById('save-button');
     const valueUrl = valueToken ? `${location.origin}/v/${encodeURIComponent(valueToken)}?only_value=true` : '';
     document.getElementById('value-url').value = valueUrl;
+    document.getElementById('value-token').value = valueToken || '';
 
     function showMessage(text, success = false) {
         message.textContent = text;
@@ -23,6 +24,17 @@
         if (!response.ok) throw new Error(await response.text() || `Request failed (${response.status})`);
         const type = response.headers.get('content-type') || '';
         return type.includes('application/json') ? response.json() : response.text();
+    }
+
+    async function copyValue(text, inputId, button) {
+        try {
+            await navigator.clipboard.writeText(text);
+            const original = button.textContent;
+            button.textContent = 'Copied';
+            setTimeout(() => button.textContent = original, 900);
+        } catch {
+            document.getElementById(inputId).select();
+        }
     }
 
     if (!valueToken) {
@@ -58,13 +70,6 @@
         }
     });
 
-    document.getElementById('copy-value-url').addEventListener('click', async event => {
-        try {
-            await navigator.clipboard.writeText(valueUrl);
-            event.currentTarget.textContent = 'Copied';
-            setTimeout(() => event.currentTarget.textContent = 'Copy', 900);
-        } catch {
-            document.getElementById('value-url').select();
-        }
-    });
+    document.getElementById('copy-value-token').addEventListener('click', event => copyValue(valueToken, 'value-token', event.currentTarget));
+    document.getElementById('copy-value-url').addEventListener('click', event => copyValue(valueUrl, 'value-url', event.currentTarget));
 })();
