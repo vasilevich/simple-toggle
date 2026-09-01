@@ -116,8 +116,5 @@
     document.getElementById('refresh-history').addEventListener('click', loadHistory);
     document.querySelector('[data-tab="history"]').addEventListener('click', () => { if (!loaded) loadHistory(); });
 
-    if (location.hash === '#history') {
-        document.querySelector('[data-tab="history"]').click();
-        loadHistory();
-    }
+    if (location.hash === '#history') document.querySelector('[data-tab="history"]').click();
 })();
