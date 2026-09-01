@@ -7,7 +7,7 @@
 .mapper-meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .mapper-meta-grid label { display: grid; gap: 6px; font-weight: 700; }
 .mapper-meta-wide { grid-column: 1 / -1; }
-.mapper-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin: 26px 0 12px; }
+.mapper-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 18px; margin: 22px 0 10px; }
 .mapper-toolbar h3 { margin: 0; }
 .mapper-toolbar p { margin: 4px 0 0; color: var(--muted); }
 .mapper-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; }
@@ -15,45 +15,201 @@
 .mapper-table th, .mapper-table td { padding: 10px 12px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
 .mapper-table th { background: var(--surface-2); color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
 .mapper-table tbody tr:last-child td { border-bottom: 0; }
-.priority-cell { width: 72px; font-weight: 800; }
+.priority-cell { width: 52px; font-weight: 800; }
 .rule-name { font-weight: 800; }
 .rule-summary, .rule-action-summary { color: var(--muted); margin-top: 3px; max-width: 500px; word-break: break-word; }
 .rule-action-summary { color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
-.rule-actions { display: flex; flex-wrap: wrap; gap: 5px; }
+.rule-actions { display: flex; flex-wrap: nowrap; gap: 5px; white-space: nowrap; }
 .mapper-empty-small { padding: 18px; margin-top: 10px; }
 .test-output { min-height: 0; max-height: 320px; overflow: auto; padding: 12px; border-radius: 10px; background: var(--surface-2); color: var(--text); white-space: pre-wrap; }
 .test-output:empty { display: none; }
-.condition-tree { display: grid; gap: 10px; }
-.condition-group { border: 1px solid var(--border); border-radius: 12px; padding: 10px; background: var(--surface-2); }
-.condition-group .condition-group { margin-left: 22px; background: var(--surface); }
-.condition-group-header { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-bottom: 9px; }
+.condition-tree { display: grid; gap: 8px; }
+.condition-group { border: 0; border-left: 3px solid var(--border); border-radius: 7px; padding: 7px 8px 7px 11px; background: transparent; }
+.condition-group .condition-group { margin-left: 16px; background: transparent; }
+.condition-group-header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; min-height: 34px; }
 .condition-group-header > span { font-weight: 800; margin-right: 2px; }
-.condition-mode, .condition-row select, .expression-node select, .mapper-action-header select, #mapper-rule-after-match { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); padding: 8px 10px; font: inherit; }
-.condition-children { display: grid; gap: 8px; }
-.condition-row { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(120px, .7fr) minmax(150px, 1fr) auto; gap: 7px; align-items: center; }
+.condition-mode, .condition-row select, .expression-node select, .mapper-action-header select, #mapper-rule-after-match { border: 1px solid var(--border); border-radius: 9px; background: var(--surface); color: var(--text); padding: 7px 9px; font: inherit; }
+.condition-children { display: grid; gap: 6px; }
+.condition-row { display: grid; grid-template-columns: minmax(160px, 1.2fr) minmax(120px, .7fr) minmax(150px, 1fr) auto; gap: 6px; align-items: center; }
 .condition-row input { min-width: 0; }
 .condition-empty { color: var(--muted); font-size: 12px; padding: 7px 2px; }
-.action-builder { margin-top: 18px; }
-.action-builder-heading { display: flex; justify-content: space-between; align-items: end; gap: 14px; margin-bottom: 10px; }
+.action-builder { margin-top: 16px; }
+.action-builder-heading { display: flex; justify-content: space-between; align-items: end; gap: 14px; margin-bottom: 8px; }
 .action-builder-heading .field-help { margin: 0; }
-.mapper-actions-list { display: grid; gap: 10px; }
-.mapper-action-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); padding: 10px; }
-.mapper-action-header { display: grid; grid-template-columns: 150px minmax(180px, 1fr) auto; gap: 8px; align-items: center; }
-.mapper-action-expression { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
-.expression-subtitle { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .04em; margin: 6px 0; }
-.expression-node { display: grid; grid-template-columns: 180px minmax(160px, 1fr); gap: 8px; align-items: start; }
+.mapper-actions-list { display: grid; gap: 8px; }
+.mapper-action-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 9px; }
+.mapper-action-header { display: grid; grid-template-columns: 135px minmax(180px, 1fr) auto; gap: 7px; align-items: center; }
+.mapper-action-expression { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.expression-subtitle { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .04em; margin: 5px 0; }
+.expression-node { display: grid; grid-template-columns: 165px minmax(160px, 1fr); gap: 7px; align-items: start; }
 .expression-type { width: 100%; }
-.expression-args { grid-column: 1 / -1; display: grid; gap: 8px; margin-left: 18px; padding-left: 10px; border-left: 2px solid var(--border); }
-.expression-arg { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; align-items: start; }
+.expression-args { grid-column: 1 / -1; display: grid; gap: 6px; margin-left: 14px; padding-left: 9px; border-left: 1px solid var(--border); }
+.expression-arg { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px; align-items: start; }
 .expression-arg > .expression-node { min-width: 0; }
-.expression-conditional { grid-column: 1 / -1; display: grid; gap: 8px; margin-left: 18px; padding-left: 10px; border-left: 2px solid var(--border); }
+.expression-conditional { grid-column: 1 / -1; display: grid; gap: 7px; margin-left: 14px; padding-left: 9px; border-left: 1px solid var(--border); }
 .expression-conditional .condition-group { margin-left: 0; }
-#mapper-rule-form > label:last-of-type { display: grid; gap: 6px; margin-top: 16px; font-weight: 700; }
+#mapper-rule-form > label:last-of-type { display: grid; gap: 6px; margin-top: 14px; font-weight: 700; }
+
+/* Mapper actions are intentionally icon-first. The original button text stays in the DOM
+   for accessibility while the visual surface is reduced to compact square controls. */
+.edit-mapper,
+.copy-mapper,
+.delete-mapper,
+#copy-mapper-runtime,
+#test-mapper,
+#add-mapper-rule,
+#add-set-action,
+#add-unset-action,
+.rule-actions > .button,
+.condition-group-header > .button,
+.condition-row > .button,
+.expression-arg > .button,
+.expression-args > .button,
+.mapper-action-header > .button {
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+    padding: 0;
+    flex: 0 0 34px;
+    border-radius: 9px;
+    font-size: 0;
+    line-height: 1;
+}
+
+.edit-mapper::before,
+.copy-mapper::before,
+.delete-mapper::before,
+#copy-mapper-runtime::before,
+#test-mapper::before,
+#add-mapper-rule::before,
+#add-set-action::before,
+#add-unset-action::before,
+.rule-actions > .button::before,
+.condition-group-header > .button::before,
+.condition-row > .button::before,
+.expression-arg > .button::before,
+.expression-args > .button::before,
+.mapper-action-header > .button::before {
+    font-size: 17px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.edit-mapper::before { content: "✎"; }
+.copy-mapper::before, #copy-mapper-runtime::before { content: "⧉"; }
+.delete-mapper::before { content: "×"; font-size: 21px; }
+#test-mapper::before { content: "▷"; }
+#add-mapper-rule::before, #add-set-action::before { content: "+"; font-size: 21px; }
+#add-unset-action::before { content: "−"; font-size: 21px; }
+
+.rule-actions > .button:nth-child(1)::before { content: "✎"; }
+.rule-actions > .button:nth-child(2)::before { content: "↑"; }
+.rule-actions > .button:nth-child(3)::before { content: "↓"; }
+.rule-actions > .button:nth-child(4)::before { content: "×"; font-size: 20px; }
+
+.condition-group-header > .button-secondary:nth-of-type(1)::before { content: "+"; font-size: 21px; }
+.condition-group-header > .button-secondary:nth-of-type(2)::before { content: "⊞"; }
+.condition-group-header > .button-danger::before,
+.condition-row > .button-danger::before,
+.expression-arg > .button-danger::before,
+.mapper-action-header > .button-danger::before { content: "×"; font-size: 20px; }
+.expression-args > .button-secondary::before { content: "+"; font-size: 21px; }
+
+/* Lightweight CSS tooltips without adding a dependency or changing the rule data model. */
+.edit-mapper { --mapper-tip: "Edit rules"; }
+.copy-mapper { --mapper-tip: "Copy definition URL"; }
+.delete-mapper { --mapper-tip: "Delete mapper"; }
+#copy-mapper-runtime { --mapper-tip: "Copy definition URL"; }
+#test-mapper { --mapper-tip: "Test example"; }
+#add-mapper-rule { --mapper-tip: "Add rule"; }
+#add-set-action { --mapper-tip: "Add set action"; }
+#add-unset-action { --mapper-tip: "Add unset action"; }
+.rule-actions > .button:nth-child(1) { --mapper-tip: "Edit rule"; }
+.rule-actions > .button:nth-child(2) { --mapper-tip: "Move up"; }
+.rule-actions > .button:nth-child(3) { --mapper-tip: "Move down"; }
+.rule-actions > .button:nth-child(4) { --mapper-tip: "Delete rule"; }
+.condition-group-header > .button-secondary:nth-of-type(1) { --mapper-tip: "Add condition"; }
+.condition-group-header > .button-secondary:nth-of-type(2) { --mapper-tip: "Add group"; }
+.condition-group-header > .button-danger { --mapper-tip: "Remove group"; }
+.condition-row > .button-danger { --mapper-tip: "Remove condition"; }
+.expression-arg > .button-danger { --mapper-tip: "Remove operand"; }
+.expression-args > .button-secondary { --mapper-tip: "Add operand"; }
+.mapper-action-header > .button-danger { --mapper-tip: "Remove action"; }
+
+.edit-mapper::after,
+.copy-mapper::after,
+.delete-mapper::after,
+#copy-mapper-runtime::after,
+#test-mapper::after,
+#add-mapper-rule::after,
+#add-set-action::after,
+#add-unset-action::after,
+.rule-actions > .button::after,
+.condition-group-header > .button::after,
+.condition-row > .button::after,
+.expression-arg > .button::after,
+.expression-args > .button::after,
+.mapper-action-header > .button::after {
+    content: var(--mapper-tip, "");
+    position: absolute;
+    z-index: 250;
+    left: 50%;
+    top: calc(100% + 7px);
+    transform: translateX(-50%) translateY(-2px);
+    padding: 5px 7px;
+    border-radius: 6px;
+    background: var(--text);
+    color: var(--surface);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.15;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .12s ease, transform .12s ease;
+}
+
+.edit-mapper:hover::after,
+.copy-mapper:hover::after,
+.delete-mapper:hover::after,
+#copy-mapper-runtime:hover::after,
+#test-mapper:hover::after,
+#add-mapper-rule:hover::after,
+#add-set-action:hover::after,
+#add-unset-action:hover::after,
+.rule-actions > .button:hover::after,
+.condition-group-header > .button:hover::after,
+.condition-row > .button:hover::after,
+.expression-arg > .button:hover::after,
+.expression-args > .button:hover::after,
+.mapper-action-header > .button:hover::after,
+.edit-mapper:focus-visible::after,
+.copy-mapper:focus-visible::after,
+.delete-mapper:focus-visible::after,
+#copy-mapper-runtime:focus-visible::after,
+#test-mapper:focus-visible::after,
+#add-mapper-rule:focus-visible::after,
+#add-set-action:focus-visible::after,
+#add-unset-action:focus-visible::after,
+.rule-actions > .button:focus-visible::after,
+.condition-group-header > .button:focus-visible::after,
+.condition-row > .button:focus-visible::after,
+.expression-arg > .button:focus-visible::after,
+.expression-args > .button:focus-visible::after,
+.mapper-action-header > .button:focus-visible::after {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
 @media (max-width: 720px) {
     .mapper-meta-grid { grid-template-columns: 1fr; }
     .mapper-meta-wide { grid-column: auto; }
     .mapper-toolbar, .action-builder-heading { align-items: stretch; flex-direction: column; }
     .condition-row, .mapper-action-header, .expression-node { grid-template-columns: 1fr; }
-    .condition-group .condition-group { margin-left: 10px; }
-    .expression-args, .expression-conditional { margin-left: 8px; }
+    .condition-group .condition-group { margin-left: 8px; }
+    .expression-args, .expression-conditional { margin-left: 6px; }
+    .action-builder-heading .card-actions, .mapper-toolbar .card-actions { justify-content: flex-end; }
 }
