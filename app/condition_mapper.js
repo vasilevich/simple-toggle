@@ -1,4 +1,5 @@
 const TABLE = 'bot_condition_mapper';
+const engine = require('./rules_engine');
 
 module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, history = null}) => {
     const schemaReady = (async () => {
@@ -23,139 +24,40 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
         try { return JSON.parse(value); } catch { return fallback; }
     };
 
-    const isPlainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-    const allowedOperators = new Set([
-        'eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains', 'starts_with', 'ends_with',
-        'in', 'not_in', 'exists', 'empty', 'not_empty'
-    ]);
-
-    const normalizeNode = node => {
-        if (node && Array.isArray(node.and)) return {type: 'group', op: 'and', children: node.and.map(normalizeNode)};
-        if (node && Array.isArray(node.or)) return {type: 'group', op: 'or', children: node.or.map(normalizeNode)};
-        if (!node || typeof node !== 'object') throw new TypeError('Condition nodes must be objects.');
-        if (node.type === 'group' || Array.isArray(node.children)) {
-            const op = String(node.op || 'and').toLowerCase();
-            if (!['and', 'or'].includes(op)) throw new TypeError('Condition group op must be "and" or "or".');
-            return {type: 'group', op, children: (node.children || []).map(normalizeNode)};
-        }
-        const field = String(node.field ?? '').trim();
-        const operatorAliases = {'=': 'eq', '==': 'eq', '!=': 'neq', '>': 'gt', '>=': 'gte', '<': 'lt', '<=': 'lte', startsWith: 'starts_with', endsWith: 'ends_with'};
-        const operator = operatorAliases[node.operator] || String(node.operator || 'eq');
-        if (!field) throw new TypeError('Every condition requires a field.');
-        if (!allowedOperators.has(operator)) throw new TypeError(`Unsupported operator: ${operator}`);
-        return {type: 'condition', field, operator, ...(operator === 'exists' || operator === 'empty' || operator === 'not_empty' ? {} : {value: node.value})};
-    };
-
-    const normalizeRules = rules => {
-        if (!Array.isArray(rules)) throw new TypeError('rules must be an array.');
-        return rules.map((rule, index) => {
-            if (!rule || typeof rule !== 'object') throw new TypeError(`Rule ${index + 1} must be an object.`);
-            const result = rule.result ?? rule.output ?? {};
-            if (!isPlainObject(result)) throw new TypeError(`Rule ${index + 1} result must be a JSON object.`);
-            return {
-                name: String(rule.name ?? ''),
-                when: normalizeNode(rule.when ?? rule.conditions ?? {type: 'group', op: 'and', children: []}),
-                result
-            };
-        });
-    };
-
     const normalizeExample = example => {
         const value = parseJson(example, {});
-        if (!isPlainObject(value)) throw new TypeError('example must be a JSON object.');
+        if (!engine.isPlainObject(value)) throw new TypeError('example must be a JSON object.');
         return value;
     };
 
-    const getPath = (obj, path) => {
-        if (obj != null && Object.prototype.hasOwnProperty.call(obj, path)) return obj[path];
-        return String(path).split('.').reduce((value, key) => value == null ? undefined : value[key], obj);
-    };
+    const revisionFor = row => `${new Date(row.updated_at || row.created_at || 0).getTime()}-${String(row.token || '').slice(0, 8)}`;
+    const etagFor = row => `"mapper-${revisionFor(row)}"`;
 
-    const asBoolean = value => {
-        if (typeof value === 'boolean') return value;
-        if (typeof value === 'number') return value !== 0;
-        if (typeof value === 'string') {
-            const lowered = value.trim().toLowerCase();
-            if (['true', '1', 'yes', 'y'].includes(lowered)) return true;
-            if (['false', '0', 'no', 'n', ''].includes(lowered)) return false;
+    const setDefinitionHeaders = (req, res, row) => {
+        const etag = etagFor(row);
+        res.set('ETag', etag);
+        res.set('Cache-Control', 'public, max-age=0, must-revalidate');
+        if (row.updated_at) res.set('Last-Modified', new Date(row.updated_at).toUTCString());
+        if (req.get('if-none-match') === etag) {
+            res.status(304).end();
+            return false;
         }
-        return Boolean(value);
-    };
-
-    const equalValue = (actual, expected) => {
-        if (expected === null) return actual == null;
-        if (typeof expected === 'number') {
-            if (actual === '' || actual == null) return false;
-            const numeric = Number(actual);
-            return Number.isFinite(numeric) && numeric === expected;
-        }
-        if (typeof expected === 'boolean') return asBoolean(actual) === expected;
-        if (typeof expected === 'object') {
-            try { return JSON.stringify(actual) === JSON.stringify(expected); } catch { return false; }
-        }
-        return String(actual ?? '') === String(expected ?? '');
-    };
-
-    const compareValue = (actual, expected) => {
-        const a = Number(actual);
-        const b = Number(expected);
-        if (actual !== '' && expected !== '' && Number.isFinite(a) && Number.isFinite(b)) return a === b ? 0 : (a > b ? 1 : -1);
-        return String(actual ?? '').localeCompare(String(expected ?? ''));
-    };
-
-    const isEmpty = value => value == null || value === '' || (Array.isArray(value) && value.length === 0) || (isPlainObject(value) && Object.keys(value).length === 0);
-
-    const evaluateCondition = (condition, input) => {
-        const actual = getPath(input, condition.field);
-        const expected = condition.value;
-        switch (condition.operator) {
-            case 'eq': return equalValue(actual, expected);
-            case 'neq': return !equalValue(actual, expected);
-            case 'gt': return compareValue(actual, expected) > 0;
-            case 'gte': return compareValue(actual, expected) >= 0;
-            case 'lt': return compareValue(actual, expected) < 0;
-            case 'lte': return compareValue(actual, expected) <= 0;
-            case 'contains': return Array.isArray(actual) ? actual.some(value => equalValue(value, expected)) : String(actual ?? '').includes(String(expected ?? ''));
-            case 'starts_with': return String(actual ?? '').startsWith(String(expected ?? ''));
-            case 'ends_with': return String(actual ?? '').endsWith(String(expected ?? ''));
-            case 'in': {
-                const list = Array.isArray(expected) ? expected : String(expected ?? '').split(',').map(value => value.trim());
-                return list.some(value => equalValue(actual, value));
-            }
-            case 'not_in': {
-                const list = Array.isArray(expected) ? expected : String(expected ?? '').split(',').map(value => value.trim());
-                return !list.some(value => equalValue(actual, value));
-            }
-            case 'exists': return actual !== undefined && actual !== null;
-            case 'empty': return isEmpty(actual);
-            case 'not_empty': return !isEmpty(actual);
-            default: return false;
-        }
-    };
-
-    const evaluateNode = (node, input) => {
-        if (node.type === 'condition') return evaluateCondition(node, input);
-        const children = node.children || [];
-        if (node.op === 'or') return children.some(child => evaluateNode(child, input));
-        return children.every(child => evaluateNode(child, input));
-    };
-
-    const evaluateRules = (rules, input) => {
-        for (let index = 0; index < rules.length; index++) {
-            if (evaluateNode(rules[index].when, input)) return {matched: true, ruleIndex: index, rule: rules[index], result: rules[index].result};
-        }
-        return {matched: false, ruleIndex: -1, rule: null, result: {}};
+        return true;
     };
 
     const serializeRow = (req, row) => ({
+        definitionVersion: 2,
+        revision: revisionFor(row),
         key: row.key,
         title: row.title || '',
         description: row.description || '',
         token: row.token,
         accessToken: row.token,
+        definitionUrl: `${getBaseUrl(req)}/m/${encodeURIComponent(row.token)}`,
+        definitionKeyUrl: `${getBaseUrl(req)}/m/key/${encodeURIComponent(row.key)}`,
         runtimeUrl: `${getBaseUrl(req)}/m/${encodeURIComponent(row.token)}`,
-        example: parseJson(row.example_json, {}),
-        rules: parseJson(row.rules_json, []),
+        example: normalizeExample(parseJson(row.example_json, {})),
+        rules: engine.normalizeRules(parseJson(row.rules_json, [])),
         updatedAt: row.updated_at,
         createdAt: row.created_at
     });
@@ -170,8 +72,14 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
         if (body.title !== undefined) update.title = String(body.title ?? '');
         if (body.description !== undefined) update.description = String(body.description ?? '');
         if (body.example !== undefined || body.example_json !== undefined) update.example_json = JSON.stringify(normalizeExample(body.example ?? body.example_json));
-        if (body.rules !== undefined || body.rules_json !== undefined) update.rules_json = JSON.stringify(normalizeRules(parseJson(body.rules ?? body.rules_json, [])));
+        if (body.rules !== undefined || body.rules_json !== undefined) update.rules_json = JSON.stringify(engine.normalizeRules(parseJson(body.rules ?? body.rules_json, [])));
         return update;
+    };
+
+    const sendDefinition = async (req, res, row) => {
+        if (!row) return res.status(404).json({error: 'Condition mapper not found.'});
+        if (!setDefinitionHeaders(req, res, row)) return;
+        res.json(serializeRow(req, row));
     };
 
     app.get('/bot/mappers', async (req, res) => {
@@ -199,7 +107,7 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
                 description: String(req.body?.description ?? ''),
                 token: await generateRandomToken(),
                 example_json: JSON.stringify(normalizeExample(req.body?.example ?? {})),
-                rules_json: JSON.stringify(normalizeRules(req.body?.rules ?? [])),
+                rules_json: JSON.stringify(engine.normalizeRules(req.body?.rules ?? [])),
                 updated_at: now,
                 created_at: now
             };
@@ -216,9 +124,7 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
         if (!verify_request(req, res)) return;
         try {
             await schemaReady;
-            const row = await knex(TABLE).where('token', req.params.token).first();
-            if (!row) return res.status(404).json({error: 'Condition mapper not found.'});
-            res.json(serializeRow(req, row));
+            await sendDefinition(req, res, await knex(TABLE).where('token', req.params.token).first());
         } catch (err) {
             console.error(err);
             res.status(500).json({error: 'Unable to retrieve condition mapper.'});
@@ -261,6 +167,30 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
         }
     });
 
+    // Public configuration distribution endpoints. These return definitions only; production row evaluation belongs in clients.
+    app.get('/m/key/:key', async (req, res) => {
+        res.set('Cache-Control', 'public, max-age=0, must-revalidate');
+        try {
+            await schemaReady;
+            const row = await knex(TABLE).where('key', req.params.key).orderBy('created_at', 'desc').first();
+            await sendDefinition(req, res, row);
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({error: 'Unable to retrieve mapper definition.'});
+        }
+    });
+
+    app.get('/m/:token', async (req, res) => {
+        try {
+            await schemaReady;
+            await sendDefinition(req, res, await knex(TABLE).where('token', req.params.token).first());
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({error: 'Unable to retrieve mapper definition.'});
+        }
+    });
+
+    // Server-side evaluation remains only as a debugging/testing convenience.
     app.post('/bot/mappers/:token/test', async (req, res) => {
         if (!verify_request(req, res)) return;
         try {
@@ -268,12 +198,11 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
             const row = await knex(TABLE).where('token', req.params.token).first();
             if (!row) return res.status(404).json({error: 'Condition mapper not found.'});
             const input = req.body ?? {};
-            if (!isPlainObject(input)) return res.status(400).json({error: 'Input must be a JSON object.'});
-            const match = evaluateRules(normalizeRules(parseJson(row.rules_json, [])), input);
-            res.json({matched: match.matched, ruleIndex: match.ruleIndex, ruleName: match.rule?.name || '', result: match.result});
+            if (!engine.isPlainObject(input)) return res.status(400).json({error: 'Input must be a JSON object.'});
+            res.json(engine.evaluateRules(parseJson(row.rules_json, []), input));
         } catch (err) {
             console.error(err);
-            res.status(500).json({error: 'Unable to test condition mapper.'});
+            res.status(err instanceof TypeError ? 400 : 500).json({error: err.message || 'Unable to test condition mapper.'});
         }
     });
 
@@ -284,16 +213,24 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
             const row = await knex(TABLE).where('token', req.params.token).first();
             if (!row) return res.status(404).json({error: 'Invalid mapper access token.'});
             const input = req.body ?? {};
-            if (!isPlainObject(input)) return res.status(400).json({error: 'Input must be a JSON object.'});
-            const match = evaluateRules(normalizeRules(parseJson(row.rules_json, [])), input);
-            const result = req.query.merge === 'true' ? {...input, ...match.result} : match.result;
-            if (req.query.meta === 'true') return res.json({matched: match.matched, ruleIndex: match.ruleIndex, ruleName: match.rule?.name || '', result});
-            res.json(result);
+            if (!engine.isPlainObject(input)) return res.status(400).json({error: 'Input must be a JSON object.'});
+            const evaluation = engine.evaluateRules(parseJson(row.rules_json, []), input);
+            if (req.query.meta === 'true') return res.json(evaluation);
+            res.json(req.query.merge === 'true' ? evaluation.output : evaluation.result);
         } catch (err) {
             console.error(err);
-            res.status(500).json({error: 'Unable to evaluate condition mapper.'});
+            res.status(err instanceof TypeError ? 400 : 500).json({error: err.message || 'Unable to evaluate condition mapper.'});
         }
     });
 
-    return {schemaReady, evaluateRules, normalizeRules, normalizeExample, serializeRow};
+    return {
+        schemaReady,
+        evaluateRules: engine.evaluateRules,
+        evaluateExpression: engine.evaluateExpression,
+        normalizeRules: engine.normalizeRules,
+        normalizeExpression: engine.normalizeExpression,
+        normalizeCondition: engine.normalizeCondition,
+        normalizeExample,
+        serializeRow
+    };
 };
