@@ -12,17 +12,29 @@
     const fieldList = document.getElementById('mapper-field-options');
     const operatorLabels = {eq: '=', neq: '!=', gt: '>', gte: '>=', lt: '<', lte: '<=', contains: 'contains', starts_with: 'starts with', ends_with: 'ends with', in: 'in', not_in: 'not in', exists: 'exists', empty: 'is empty', not_empty: 'is not empty'};
     const unaryOperators = new Set(['exists', 'empty', 'not_empty']);
+    const expressionTypes = {
+        const: 'Constant', field: 'Field', add: 'Add (+)', subtract: 'Subtract (-)', multiply: 'Multiply (×)', divide: 'Divide (÷)',
+        concat: 'Concat text', coalesce: 'Coalesce/default', conditional: 'Conditional (if/then/else)'
+    };
     if (!isAdmin) document.getElementById('open-create-mapper').hidden = true;
 
     let mappers = [];
     let currentMapper = null;
     let currentRuleIndex = -1;
     let workingWhen = null;
+    let workingActions = [];
 
     const clone = value => JSON.parse(JSON.stringify(value));
     const isPlainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
     const newCondition = () => ({type: 'condition', field: '', operator: 'eq', value: ''});
     const newGroup = () => ({type: 'group', op: 'and', children: [newCondition()]});
+    const newExpression = type => {
+        if (type === 'field') return {type: 'field', path: ''};
+        if (type === 'conditional') return {type: 'conditional', when: newGroup(), then: {type: 'const', value: ''}, else: {type: 'const', value: ''}};
+        if (['add', 'subtract', 'multiply', 'divide', 'concat', 'coalesce'].includes(type)) return {type: 'op', op: type, args: [{type: 'const', value: ''}, {type: 'const', value: ''}]};
+        return {type: 'const', value: ''};
+    };
+    const newAction = type => type === 'unset' ? {type: 'unset', field: ''} : {type: 'set', field: '', value: newExpression('const')};
 
     function showError(message) { globalError.textContent = message; globalError.hidden = false; }
     function clearError() { globalError.textContent = ''; globalError.hidden = true; }
@@ -43,6 +55,20 @@
         let value;
         try { value = JSON.parse(text || '{}'); } catch (err) { throw new Error(`${label} is not valid JSON: ${err.message}`); }
         if (!isPlainObject(value)) throw new Error(`${label} must be a JSON object.`);
+        return value;
+    }
+
+    function parseLooseValue(value) {
+        if (typeof value !== 'string') return value;
+        const trimmed = value.trim();
+        if (trimmed === '') return '';
+        if (trimmed === 'null') return null;
+        if (trimmed === 'true') return true;
+        if (trimmed === 'false') return false;
+        if (/^-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed)) return Number(trimmed);
+        if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('"')) {
+            try { return JSON.parse(trimmed); } catch {}
+        }
         return value;
     }
 
@@ -102,7 +128,7 @@
         }
         if (sample === null && trimmed === 'null') return null;
         if (Array.isArray(sample) || isPlainObject(sample)) { try { return JSON.parse(trimmed); } catch { return text; } }
-        return text;
+        return parseLooseValue(text);
     }
 
     function coerceNode(node, example) {
@@ -120,12 +146,44 @@
         return result;
     }
 
+    function coerceExpression(expr, example) {
+        if (!expr || typeof expr !== 'object') return {type: 'const', value: parseLooseValue(expr)};
+        if (expr.type === 'const') return {type: 'const', value: parseLooseValue(expr.value)};
+        if (expr.type === 'field') {
+            const path = String(expr.path || '').trim();
+            if (!path) throw new Error('Field expressions need a field.');
+            return {type: 'field', path};
+        }
+        if (expr.type === 'conditional') return {type: 'conditional', when: coerceNode(expr.when || newGroup(), example), then: coerceExpression(expr.then, example), else: coerceExpression(expr.else, example)};
+        if (expr.type === 'op') return {type: 'op', op: expr.op, args: (expr.args || []).map(arg => coerceExpression(arg, example))};
+        throw new Error(`Unsupported expression type ${expr.type}`);
+    }
+
+    function resultToActions(result) {
+        return Object.entries(result || {}).map(([field, value]) => ({type: 'set', field, value: {type: 'const', value}}));
+    }
+
     function summarizeNode(node) {
         if (!node) return '(always)';
         if (node.type === 'condition') return `${node.field || '?'} ${operatorLabels[node.operator] || node.operator} ${unaryOperators.has(node.operator) ? '' : formatValue(node.value)}`.trim();
-        if (!node.children?.length) return '(always)';
+        if (!node.children?.length) return node.op === 'or' ? '(never)' : '(always)';
         const glue = node.op === 'or' ? ' OR ' : ' AND ';
         return node.children.map(child => child.type === 'group' ? `(${summarizeNode(child)})` : summarizeNode(child)).join(glue);
+    }
+
+    function summarizeExpression(expr) {
+        if (!expr) return 'null';
+        if (expr.type === 'const') return formatValue(expr.value);
+        if (expr.type === 'field') return `[${expr.path || '?'}]`;
+        if (expr.type === 'conditional') return `IF ${summarizeNode(expr.when)} THEN ${summarizeExpression(expr.then)} ELSE ${summarizeExpression(expr.else)}`;
+        const symbols = {add: ' + ', subtract: ' - ', multiply: ' × ', divide: ' ÷ ', concat: ' concat ', coalesce: ' ?? '};
+        return `(${(expr.args || []).map(summarizeExpression).join(symbols[expr.op] || ` ${expr.op} `)})`;
+    }
+
+    function summarizeActions(rule) {
+        const actions = rule.actions || resultToActions(rule.result);
+        if (!actions.length) return '(no actions)';
+        return actions.map(action => action.type === 'unset' ? `unset ${action.field}` : `${action.field} = ${summarizeExpression(action.value)}`).join('; ');
     }
 
     async function copyText(text, button = null) {
@@ -137,7 +195,7 @@
         const card = document.createElement('article');
         card.className = 'control-card';
         card.dataset.search = `${mapper.key || ''} ${mapper.title || ''} ${mapper.description || ''}`.toLowerCase();
-        card.innerHTML = `<div class="control-card-header"><div><h3></h3><div class="meta"><span class="badge mapper-key"></span><span class="badge mapper-rules"></span></div></div><span class="badge">mapper</span></div><p class="description"></p><div class="card-actions"><button class="button button-primary button-small edit-mapper" type="button">Edit rules</button><button class="button button-secondary button-small copy-mapper" type="button">Copy runtime URL</button><button class="button button-danger button-small delete-mapper" type="button">Delete</button></div>`;
+        card.innerHTML = `<div class="control-card-header"><div><h3></h3><div class="meta"><span class="badge mapper-key"></span><span class="badge mapper-rules"></span></div></div><span class="badge">mapper</span></div><p class="description"></p><div class="card-actions"><button class="button button-primary button-small edit-mapper" type="button">Edit rules</button><button class="button button-secondary button-small copy-mapper" type="button">Copy definition URL</button><button class="button button-danger button-small delete-mapper" type="button">Delete</button></div>`;
         card.querySelector('h3').textContent = mapper.title || mapper.key;
         card.querySelector('.mapper-key').textContent = mapper.key;
         card.querySelector('.mapper-rules').textContent = `${mapper.rules?.length || 0} rules`;
@@ -145,7 +203,7 @@
         const editMapper = card.querySelector('.edit-mapper');
         if (!isAdmin) editMapper.hidden = true;
         editMapper.addEventListener('click', () => openMapperEditor(mapper));
-        card.querySelector('.copy-mapper').addEventListener('click', event => copyText(mapper.runtimeUrl, event.currentTarget));
+        card.querySelector('.copy-mapper').addEventListener('click', event => copyText(mapper.definitionKeyUrl || mapper.definitionUrl || mapper.runtimeUrl, event.currentTarget));
         const remove = card.querySelector('.delete-mapper');
         if (!isAdmin) remove.hidden = true;
         remove.addEventListener('click', async () => {
@@ -201,7 +259,7 @@
         document.getElementById('mapper-title-input').value = mapper.title || '';
         document.getElementById('mapper-description-input').value = mapper.description || '';
         document.getElementById('mapper-example-input').value = JSON.stringify(mapper.example || {}, null, 2);
-        document.getElementById('mapper-runtime-url').value = mapper.runtimeUrl || `${location.origin}/m/${mapper.token}`;
+        document.getElementById('mapper-runtime-url').value = mapper.definitionKeyUrl || mapper.definitionUrl || `${location.origin}/m/key/${encodeURIComponent(mapper.key)}`;
         document.getElementById('mapper-test-output').textContent = '';
         refreshFieldList(mapper.example || {});
         renderRules();
@@ -215,7 +273,7 @@
     async function saveCurrentMapper() {
         currentMapper = await api(`/bot/mappers/${encodeURIComponent(currentMapper.token)}`, {method: 'POST', body: JSON.stringify(collectMapperForm())});
         document.getElementById('mapper-editor-title').textContent = currentMapper.title || currentMapper.key;
-        document.getElementById('mapper-runtime-url').value = currentMapper.runtimeUrl;
+        document.getElementById('mapper-runtime-url').value = currentMapper.definitionKeyUrl || currentMapper.definitionUrl;
         refreshFieldList(currentMapper.example);
         renderRules();
         await loadMappers();
@@ -258,11 +316,12 @@
         const rules = currentMapper?.rules || [];
         body.replaceChildren(...rules.map((rule, index) => {
             const row = document.createElement('tr');
-            row.innerHTML = `<td class="priority-cell"></td><td><div class="rule-name"></div><div class="rule-summary"></div></td><td><code class="rule-result"></code></td><td><div class="rule-actions"></div></td>`;
+            row.innerHTML = `<td class="priority-cell"></td><td><div class="rule-name"></div><div class="rule-summary"></div></td><td><div class="rule-action-summary"></div><div class="meta"><span class="badge rule-flow"></span></div></td><td><div class="rule-actions"></div></td>`;
             row.querySelector('.priority-cell').textContent = String(index + 1);
             row.querySelector('.rule-name').textContent = rule.name || `Rule ${index + 1}`;
             row.querySelector('.rule-summary').textContent = summarizeNode(rule.when);
-            row.querySelector('.rule-result').textContent = JSON.stringify(rule.result || {});
+            row.querySelector('.rule-action-summary').textContent = summarizeActions(rule);
+            row.querySelector('.rule-flow').textContent = (rule.afterMatch || 'stop') === 'continue' ? 'continue after match' : 'stop after match';
             const actions = row.querySelector('.rule-actions');
             const up = actionButton('↑', () => moveRule(index, -1), 'button-secondary');
             const down = actionButton('↓', () => moveRule(index, 1), 'button-secondary');
@@ -291,23 +350,25 @@
 
     function openRuleEditor(index) {
         currentRuleIndex = index;
-        const rule = index >= 0 ? currentMapper.rules[index] : {name: '', when: newGroup(), result: {}};
+        const rule = index >= 0 ? currentMapper.rules[index] : {name: '', when: newGroup(), actions: [newAction('set')], afterMatch: 'stop'};
         workingWhen = clone(rule.when || newGroup());
+        workingActions = clone(rule.actions || resultToActions(rule.result));
         document.getElementById('mapper-rule-title').textContent = index >= 0 ? `Edit rule ${index + 1}` : 'New rule';
         document.getElementById('mapper-rule-name').value = rule.name || '';
-        document.getElementById('mapper-rule-result').value = JSON.stringify(rule.result || {}, null, 2);
+        document.getElementById('mapper-rule-after-match').value = rule.afterMatch || 'stop';
         refreshFieldList();
         renderConditionTree();
+        renderActions();
         openModal(ruleModal);
     }
 
     function renderConditionTree() {
         const root = document.getElementById('mapper-condition-tree');
         root.replaceChildren();
-        renderGroup(workingWhen, root, true, null, -1);
+        renderGroup(workingWhen, root, true, null, -1, renderConditionTree);
     }
 
-    function renderGroup(group, parent, isRoot, parentGroup, parentIndex) {
+    function renderGroup(group, parent, isRoot, parentGroup, parentIndex, rerender) {
         const wrapper = document.createElement('div');
         wrapper.className = 'condition-group';
         const header = document.createElement('div');
@@ -319,14 +380,14 @@
         mode.innerHTML = '<option value="and">ALL (AND)</option><option value="or">ANY (OR)</option>';
         mode.value = group.op || 'and';
         mode.addEventListener('change', () => group.op = mode.value);
-        header.append(label, mode, actionButton('+ Condition', () => { group.children.push(newCondition()); renderConditionTree(); }, 'button-secondary'), actionButton('+ Group', () => { group.children.push(newGroup()); renderConditionTree(); }, 'button-secondary'));
-        if (!isRoot) header.append(actionButton('Remove group', () => { parentGroup.children.splice(parentIndex, 1); renderConditionTree(); }, 'button-danger'));
+        header.append(label, mode, actionButton('+ Condition', () => { group.children.push(newCondition()); rerender(); }, 'button-secondary'), actionButton('+ Group', () => { group.children.push(newGroup()); rerender(); }, 'button-secondary'));
+        if (!isRoot) header.append(actionButton('Remove group', () => { parentGroup.children.splice(parentIndex, 1); rerender(); }, 'button-danger'));
         wrapper.append(header);
 
         const children = document.createElement('div');
         children.className = 'condition-children';
         group.children.forEach((child, index) => {
-            if (child.type === 'group') return renderGroup(child, children, false, group, index);
+            if (child.type === 'group') return renderGroup(child, children, false, group, index, rerender);
             const row = document.createElement('div');
             row.className = 'condition-row';
             const field = document.createElement('input');
@@ -344,7 +405,7 @@
             operator.addEventListener('change', () => { child.operator = operator.value; value.hidden = unaryOperators.has(operator.value); });
             value.hidden = unaryOperators.has(operator.value);
             updatePlaceholder();
-            row.append(field, operator, value, actionButton('×', () => { group.children.splice(index, 1); renderConditionTree(); }, 'button-danger'));
+            row.append(field, operator, value, actionButton('×', () => { group.children.splice(index, 1); rerender(); }, 'button-danger'));
             children.append(row);
         });
         if (!group.children.length) {
@@ -357,6 +418,107 @@
         parent.append(wrapper);
     }
 
+    function expressionType(expr) {
+        if (expr?.type === 'op') return expr.op;
+        return expr?.type || 'const';
+    }
+
+    function replaceExpression(target, replacement) {
+        Object.keys(target).forEach(key => delete target[key]);
+        Object.assign(target, replacement);
+    }
+
+    function renderExpression(expr, parent, rerender) {
+        const node = document.createElement('div');
+        node.className = 'expression-node';
+        const type = document.createElement('select');
+        type.className = 'expression-type';
+        Object.entries(expressionTypes).forEach(([value, text]) => { const option = document.createElement('option'); option.value = value; option.textContent = text; type.append(option); });
+        type.value = expressionType(expr);
+        type.addEventListener('change', () => { replaceExpression(expr, newExpression(type.value)); rerender(); });
+        node.append(type);
+
+        if (expr.type === 'const') {
+            const value = document.createElement('input');
+            value.placeholder = 'constant: text, number, true, null, JSON…';
+            value.value = formatValue(expr.value);
+            value.addEventListener('input', () => expr.value = value.value);
+            node.append(value);
+        } else if (expr.type === 'field') {
+            const field = document.createElement('input');
+            field.setAttribute('list', 'mapper-field-options');
+            field.placeholder = 'input field';
+            field.value = expr.path || '';
+            field.addEventListener('input', () => expr.path = field.value);
+            node.append(field);
+        } else if (expr.type === 'op') {
+            const args = document.createElement('div');
+            args.className = 'expression-args';
+            (expr.args || []).forEach((arg, index) => {
+                const argRow = document.createElement('div');
+                argRow.className = 'expression-arg';
+                renderExpression(arg, argRow, rerender);
+                if ((expr.args || []).length > 1) argRow.append(actionButton('×', () => { expr.args.splice(index, 1); rerender(); }, 'button-danger'));
+                args.append(argRow);
+            });
+            args.append(actionButton('+ Operand', () => { expr.args.push(newExpression('const')); rerender(); }, 'button-secondary'));
+            node.append(args);
+        } else if (expr.type === 'conditional') {
+            const conditional = document.createElement('div');
+            conditional.className = 'expression-conditional';
+            const conditionLabel = document.createElement('div'); conditionLabel.className = 'expression-subtitle'; conditionLabel.textContent = 'IF';
+            const condition = document.createElement('div');
+            renderGroup(expr.when || (expr.when = newGroup()), condition, true, null, -1, rerender);
+            const thenLabel = document.createElement('div'); thenLabel.className = 'expression-subtitle'; thenLabel.textContent = 'THEN';
+            const thenNode = document.createElement('div'); renderExpression(expr.then || (expr.then = newExpression('const')), thenNode, rerender);
+            const elseLabel = document.createElement('div'); elseLabel.className = 'expression-subtitle'; elseLabel.textContent = 'ELSE';
+            const elseNode = document.createElement('div'); renderExpression(expr.else || (expr.else = newExpression('const')), elseNode, rerender);
+            conditional.append(conditionLabel, condition, thenLabel, thenNode, elseLabel, elseNode);
+            node.append(conditional);
+        }
+        parent.append(node);
+    }
+
+    function renderActions() {
+        const root = document.getElementById('mapper-actions-list');
+        root.replaceChildren(...workingActions.map((action, index) => {
+            const card = document.createElement('div');
+            card.className = 'mapper-action-card';
+            const header = document.createElement('div');
+            header.className = 'mapper-action-header';
+            const type = document.createElement('select');
+            type.innerHTML = '<option value="set">Set field</option><option value="unset">Unset field</option>';
+            type.value = action.type || 'set';
+            type.addEventListener('change', () => {
+                const field = action.field || '';
+                workingActions[index] = type.value === 'unset' ? {type: 'unset', field} : {type: 'set', field, value: newExpression('const')};
+                renderActions();
+            });
+            const field = document.createElement('input');
+            field.setAttribute('list', 'mapper-field-options');
+            field.placeholder = 'target field';
+            field.value = action.field || '';
+            field.addEventListener('input', () => action.field = field.value);
+            header.append(type, field, actionButton('Remove', () => { workingActions.splice(index, 1); renderActions(); }, 'button-danger'));
+            card.append(header);
+            if ((action.type || 'set') === 'set') {
+                const expression = document.createElement('div');
+                expression.className = 'mapper-action-expression';
+                const label = document.createElement('div');
+                label.className = 'expression-subtitle';
+                label.textContent = 'Value / expression';
+                expression.append(label);
+                renderExpression(action.value || (action.value = newExpression('const')), expression, renderActions);
+                card.append(expression);
+            }
+            return card;
+        }));
+        document.getElementById('mapper-actions-empty').hidden = workingActions.length !== 0;
+    }
+
+    document.getElementById('add-set-action').addEventListener('click', () => { workingActions.push(newAction('set')); renderActions(); });
+    document.getElementById('add-unset-action').addEventListener('click', () => { workingActions.push(newAction('unset')); renderActions(); });
+
     document.getElementById('mapper-rule-form').addEventListener('submit', async event => {
         event.preventDefault();
         const submit = event.submitter;
@@ -364,7 +526,18 @@
         clearError();
         try {
             const example = parseObject(document.getElementById('mapper-example-input').value, 'Example object');
-            const rule = {name: document.getElementById('mapper-rule-name').value.trim(),when: coerceNode(workingWhen, example),result: parseObject(document.getElementById('mapper-rule-result').value, 'Rule result')};
+            const actions = workingActions.map((action, index) => {
+                const field = String(action.field || '').trim();
+                if (!field) throw new Error(`Action ${index + 1} needs a target field.`);
+                if (action.type === 'unset') return {type: 'unset', field};
+                return {type: 'set', field, value: coerceExpression(action.value, example)};
+            });
+            const rule = {
+                name: document.getElementById('mapper-rule-name').value.trim(),
+                when: coerceNode(workingWhen, example),
+                actions,
+                afterMatch: document.getElementById('mapper-rule-after-match').value
+            };
             if (currentRuleIndex >= 0) currentMapper.rules[currentRuleIndex] = rule;
             else currentMapper.rules.push(rule);
             await saveCurrentMapper();
