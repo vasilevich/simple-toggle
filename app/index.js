@@ -7,6 +7,8 @@ const rtg = require('random-token-generator');
 const {randomBytes} = require('crypto');
 const {existsSync, unlinkSync, chmodSync} = require('fs');
 const registerConditionMapper = require('./condition_mapper');
+const registerHistory = require('./history');
+const registerMcp = require('./mcp');
 const token = config.get('token');
 const configuredUrl = config.has('url') ? config.get('url') : '';
 const getBaseUrl = req => (configuredUrl || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
@@ -100,7 +102,14 @@ const verify_request = (req, res) => {
     return true;
 };
 
-registerConditionMapper({app, knex, verify_request, generateRandomToken, getBaseUrl});
+const history = registerHistory({
+    app,
+    knex,
+    verify_request,
+    historyLimit: config.has('historyLimit') ? config.get('historyLimit') : 100
+});
+const mapperApi = registerConditionMapper({app, knex, verify_request, generateRandomToken, getBaseUrl, history});
+registerMcp({app, knex, history, mapperApi, generateRandomToken, configuredUrl, temporaryLinkTable: TEMP_LINK_TABLE});
 
 const buildValueControl = (req, randomToken) => {
     const now = new Date();
@@ -156,30 +165,27 @@ const getTemporaryLink = async code => {
     return link;
 };
 
-app.get('/bot/generate_link', async (req, res) => {
-    if (!verify_request(req, res)) return;
+const createValueControl = async (req, res) => {
     try {
         const randomToken = await generateRandomToken();
         const data = buildValueControl(req, randomToken);
         await knex('bot_single_value_control').insert(data);
+        await history.record('value', data.token, 'create', null, data, 'api');
         res.json(valueControlResponse(req, data));
     } catch (err) {
         console.log(err);
         res.status(500).send(err);
     }
+};
+
+app.get('/bot/generate_link', (req, res) => {
+    if (!verify_request(req, res)) return;
+    return createValueControl(req, res);
 });
 
-app.post('/bot/generate_link', async (req, res) => {
+app.post('/bot/generate_link', (req, res) => {
     if (!verify_request(req, res)) return;
-    try {
-        const randomToken = await generateRandomToken();
-        const data = buildValueControl(req, randomToken);
-        await knex('bot_single_value_control').insert(data);
-        res.json(valueControlResponse(req, data));
-    } catch (err) {
-        console.log(err);
-        res.status(500).send(err);
-    }
+    return createValueControl(req, res);
 });
 
 app.get('/v/:token', async (req, res) => {
@@ -201,8 +207,11 @@ app.get('/v/:token', async (req, res) => {
 app.post('/v/:token', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
-        const updated = await knex('bot_single_value_control').where('token', req.params.token).update({value: req.body?.value ?? '',status: 1,updated_at: new Date()});
-        if (!updated) return res.status(404).json({error: 'Invalid value access token.'});
+        const before = await knex('bot_single_value_control').where('token', req.params.token).first();
+        if (!before) return res.status(404).json({error: 'Invalid value access token.'});
+        const update = {value: req.body?.value ?? '', status: 1, updated_at: new Date()};
+        await knex('bot_single_value_control').where('token', req.params.token).update(update);
+        await history.record('value', req.params.token, 'update', before, {...before, ...update}, 'permanent');
         res.json({status: 'success'});
     } catch (err) {
         console.log(err);
@@ -259,8 +268,12 @@ app.post('/t/:code', async (req, res) => {
             if (link.expires_at && new Date(link.expires_at).getTime() <= Date.now()) { await trx(TEMP_LINK_TABLE).where('code', req.params.code).del(); return {ok: false, reason: 'expired'}; }
             const claimed = await trx(TEMP_LINK_TABLE).where('code', req.params.code).del();
             if (claimed !== 1) return {ok: false, reason: 'used'};
-            const updated = await trx('bot_single_value_control').where('token', link.value_token).update({value: req.body?.value ?? '',status: 1,updated_at: new Date()});
+            const before = await trx('bot_single_value_control').where('token', link.value_token).first();
+            if (!before) return {ok: false, reason: 'missing'};
+            const update = {value: req.body?.value ?? '', status: 1, updated_at: new Date()};
+            const updated = await trx('bot_single_value_control').where('token', link.value_token).update(update);
             if (!updated) return {ok: false, reason: 'missing'};
+            await history.record('value', link.value_token, 'update', before, {...before, ...update}, 'temporary', trx);
             return {ok: true};
         });
         const wantsJson = req.is('application/json');
@@ -279,9 +292,11 @@ app.post('/t/:code', async (req, res) => {
 app.post('/bot/set_value/:token', async (req, res) => {
     if (!verify_request(req, res)) return;
     try {
-        const row = await knex('bot_single_value_control').where('token', req.params.token).first();
-        if (!row) return res.status(404).send({error: 'Invalid token.'});
-        await knex('bot_single_value_control').where('token', req.params.token).update({value: req.body.value,status: 1,updated_at: new Date()});
+        const before = await knex('bot_single_value_control').where('token', req.params.token).first();
+        if (!before) return res.status(404).send({error: 'Invalid token.'});
+        const update = {value: req.body.value, status: 1, updated_at: new Date()};
+        await knex('bot_single_value_control').where('token', req.params.token).update(update);
+        await history.record('value', req.params.token, 'update', before, {...before, ...update}, 'api');
         res.json({status: 'success'});
     } catch (err) { console.log(err); res.status(500).send(err); }
 });
@@ -291,7 +306,11 @@ app.delete('/bot/delete_value/:token', async (req, res) => {
     try {
         const row = await knex('bot_single_value_control').where('token', req.params.token).first();
         if (!row) return res.status(404).send({error: 'Invalid token.'});
-        await knex.transaction(async trx => { await trx(TEMP_LINK_TABLE).where('value_token', req.params.token).del(); await trx('bot_single_value_control').where('token', req.params.token).del(); });
+        await knex.transaction(async trx => {
+            await trx(TEMP_LINK_TABLE).where('value_token', req.params.token).del();
+            await trx('bot_single_value_control').where('token', req.params.token).del();
+            await history.record('value', req.params.token, 'delete', row, null, 'api', trx);
+        });
         res.json({success: 'Value deleted successfully.'});
     } catch (err) { console.log(err); res.status(500).send(err); }
 });
@@ -342,9 +361,11 @@ app.post('/bot/:bot_name', async (req, res) => {
             if (req.body.title !== undefined) update.title = req.body.title;
             if (req.body.description !== undefined) update.description = req.body.description;
             await knex('bot_control').where('bot_name', botName).update(update);
+            await history.record('toggle', botName, 'update', row, {...row, ...update}, 'api');
         } else {
             data.created_at = new Date();
             await knex('bot_control').insert(data);
+            await history.record('toggle', botName, 'create', null, data, 'api');
         }
         res.json({status: Boolean(data.status)});
     } catch (err) { console.log(err); res.status(500).send(err); }
@@ -352,8 +373,14 @@ app.post('/bot/:bot_name', async (req, res) => {
 
 app.delete('/bot/:bot_name', async (req, res) => {
     if (!verify_request(req, res)) return;
-    try { await knex('bot_control').where('bot_name', req.params.bot_name).del(); res.json({status: 'success'}); }
-    catch (err) { console.log(err); res.status(500).send(err); }
+    try {
+        const before = await knex('bot_control').where('bot_name', req.params.bot_name).first();
+        await knex.transaction(async trx => {
+            await trx('bot_control').where('bot_name', req.params.bot_name).del();
+            if (before) await history.record('toggle', req.params.bot_name, 'delete', before, null, 'api', trx);
+        });
+        res.json({status: 'success'});
+    } catch (err) { console.log(err); res.status(500).send(err); }
 });
 
 const wsProxy = createProxyMiddleware({target: 'http://kuma', changeOrigin: true, ws: true, logger: console});
