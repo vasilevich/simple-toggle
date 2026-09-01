@@ -14,4 +14,68 @@
 .history-json-grid{display:grid;grid-template-columns:1fr;gap:8px;margin-top:8px}
 .history-json-grid strong{display:block;font-size:11px;color:var(--muted);margin-bottom:4px}
 .history-json-grid pre{margin:0;max-width:440px;max-height:260px;overflow:auto;padding:9px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);font-size:11px;white-space:pre-wrap;word-break:break-word}
-@media(max-width:720px){.mcp-card .value-row{flex-direction:column}.history-table-wrap{margin-inline:-14px;border-radius:0;border-left:0;border-right:0}}
+
+/* Human-readable mapper overview: IF [condition] -> THEN [result]. */
+.mapper-table{min-width:680px!important}
+.mapper-table th:nth-child(1){width:64px}
+.mapper-table th:last-child{width:154px}
+.mapper-rule-friendly .priority-cell{width:64px;text-align:center;color:var(--muted);font-size:12px}
+.mapper-rule-friendly .priority-cell::before{content:'#';opacity:.55}
+.rule-friendly-cell{min-width:430px}
+.rule-friendly-name{font-weight:800;margin-bottom:8px}
+.rule-logic-flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rule-logic-pill{display:inline-flex;align-items:center;gap:7px;max-width:100%;padding:6px 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface-2);box-shadow:0 1px 2px rgba(0,0,0,.03)}
+.rule-condition-pill{border-color:color-mix(in srgb,var(--accent) 34%,var(--border));background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.rule-result-pill{border-color:color-mix(in srgb,var(--good) 34%,var(--border));background:color-mix(in srgb,var(--good) 7%,var(--surface))}
+.rule-logic-kind{font-size:10px;font-weight:900;letter-spacing:.08em;color:var(--muted);flex:0 0 auto}
+.rule-condition-pill .rule-logic-kind{color:var(--accent)}
+.rule-result-pill .rule-logic-kind{color:var(--good)}
+.rule-logic-text{font-size:12px;font-weight:650;line-height:1.35;word-break:break-word}
+.rule-logic-arrow{font-size:18px;font-weight:900;color:var(--muted);line-height:1}
+.rule-flow-chip{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;border:1px solid var(--border);font-size:10px;font-weight:900;letter-spacing:.06em;white-space:nowrap}
+.rule-flow-chip.stop{color:var(--bad);background:color-mix(in srgb,var(--bad) 7%,var(--surface))}
+.rule-flow-chip.continue{color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.mapper-rule-friendly .rule-actions{justify-content:flex-end;flex-wrap:nowrap}
+
+/* Make the editor labels read like business logic rather than implementation terminology. */
+#mapper-rule-form .field-label{display:inline-flex;align-items:center;gap:6px}
+#mapper-rule-form .field-label::before{display:inline-grid;place-items:center;min-width:34px;height:22px;padding:0 7px;border-radius:999px;font-size:10px;font-weight:900;letter-spacing:.08em;background:var(--surface-2);border:1px solid var(--border)}
+#mapper-rule-form>label+div .field-label::before{content:'IF';color:var(--accent)}
+.action-builder .field-label::before{content:'THEN';color:var(--good)}
+
+/* Permanent value access token: visible and deliberately named so it is not confused with the admin token. */
+.value-token-block{margin-top:12px;padding:10px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2)}
+.value-token-heading{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:6px}
+.value-token-heading strong{font-size:12px}
+.value-token-heading span{color:var(--muted);font-size:10px}
+.value-token-row{display:flex;align-items:center;gap:7px}
+.value-token-row input{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;padding:7px 9px;background:var(--surface)}
+.value-token-row .button{padding:6px 9px}
+.value-link-block .value-token-explanation{display:block;margin:0 0 6px;color:var(--muted);font-size:11px}
+
+/* Dedicated MCP page. */
+.mcp-hero{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:14px;margin-bottom:18px}
+.mcp-info-card{padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}
+.mcp-info-card h3{margin:0 0 6px}.mcp-info-card p{margin:0;color:var(--muted)}
+.mcp-endpoint-label{display:flex;align-items:center;gap:8px;margin:14px 0 6px;font-size:12px;font-weight:800}
+.mcp-status-pill{display:inline-flex;align-items:center;padding:3px 7px;border-radius:999px;background:color-mix(in srgb,var(--good) 10%,var(--surface));border:1px solid color-mix(in srgb,var(--good) 30%,var(--border));color:var(--good);font-size:10px;font-weight:900;letter-spacing:.05em}
+.mcp-warning{margin-top:12px;padding:9px 10px;border-radius:9px;border:1px solid color-mix(in srgb,var(--bad) 28%,var(--border));background:color-mix(in srgb,var(--bad) 6%,var(--surface));font-size:12px}
+.mcp-facts{display:grid;gap:9px;margin-top:10px}
+.mcp-fact{display:grid;grid-template-columns:110px 1fr;gap:8px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.mcp-fact:last-child{border-bottom:0;padding-bottom:0}.mcp-fact strong{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.mcp-capabilities{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.mcp-capability{padding:5px 8px;border:1px solid var(--border);border-radius:999px;background:var(--surface-2);font-size:11px;font-weight:700}
+.mcp-history-heading{display:flex;align-items:end;justify-content:space-between;gap:12px;margin:20px 0 10px}
+.mcp-history-heading h3{margin:0}.mcp-history-heading p{margin:3px 0 0;color:var(--muted);font-size:12px}
+.mcp-history-list{display:grid;gap:8px}
+.mcp-history-item{display:grid;grid-template-columns:150px minmax(180px,1fr) minmax(180px,1fr) auto;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--border);border-radius:11px;background:var(--surface)}
+.mcp-history-item .mcp-time{color:var(--muted);font-size:11px}.mcp-history-item .mcp-control{font-weight:750}.mcp-history-change{display:flex;gap:6px;align-items:center;min-width:0}.mcp-history-change code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px;padding:3px 5px;border-radius:6px;background:var(--surface-2);font-size:10px}
+.mcp-history-actions{display:flex;gap:6px;align-items:center}.mcp-history-actions details{position:relative}.mcp-history-actions details[open] .mcp-history-popover{display:grid}.mcp-history-popover{display:none;position:absolute;right:0;top:28px;z-index:300;width:min(600px,80vw);grid-template-columns:1fr 1fr;gap:8px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface);box-shadow:var(--shadow)}
+.mcp-history-popover pre{margin:4px 0 0;max-height:260px;overflow:auto;padding:8px;border-radius:8px;background:var(--surface-2);font-size:10px;white-space:pre-wrap;word-break:break-word}
+
+@media(max-width:720px){
+  .mcp-card .value-row{flex-direction:column}.history-table-wrap{margin-inline:-14px;border-radius:0;border-left:0;border-right:0}
+  .rule-logic-flow{align-items:flex-start;flex-direction:column}.rule-logic-arrow{transform:rotate(90deg);margin-left:16px}
+  .mcp-hero{grid-template-columns:1fr}.mcp-fact{grid-template-columns:1fr;gap:2px}.mcp-history-item{grid-template-columns:1fr}.mcp-history-change code{max-width:45vw}.mcp-history-popover{position:fixed;left:14px;right:14px;top:20vh;width:auto;grid-template-columns:1fr}
+  .value-token-row{align-items:stretch;flex-direction:column}
+}
