@@ -19,10 +19,17 @@
         </form>
         <div id="page-message" class="alert" hidden></div>
         <div class="value-link-block">
-            <span>Raw value URL</span>
+            <span><strong>Permanent value access token</strong> · this token is the read/write credential for this value</span>
+            <div class="value-row">
+                <input id="value-token" readonly aria-label="Permanent value access token">
+                <button id="copy-value-token" class="button button-secondary button-small" type="button">Copy token</button>
+            </div>
+        </div>
+        <div class="value-link-block">
+            <span>Raw value URL · uses the permanent value access token</span>
             <div class="value-row">
                 <input id="value-url" readonly>
-                <button id="copy-value-url" class="button button-secondary button-small" type="button">Copy</button>
+                <button id="copy-value-url" class="button button-secondary button-small" type="button">Copy URL</button>
             </div>
         </div>
         <a class="button button-secondary back-link" href="/">Back to dashboard</a>
