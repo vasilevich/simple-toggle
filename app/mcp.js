@@ -3,11 +3,6 @@ const {StreamableHTTPServerTransport} = require('@modelcontextprotocol/sdk/serve
 const {z} = require('zod');
 
 module.exports = ({app, knex, history, mapperApi, generateRandomToken, configuredUrl = '', temporaryLinkTable = 'bot_temporary_value_link'}) => {
-    const parseJson = (value, fallback) => {
-        if (value == null || value === '') return fallback;
-        if (typeof value !== 'string') return value;
-        try { return JSON.parse(value); } catch { return fallback; }
-    };
     const valueForDb = value => typeof value === 'string' ? value : JSON.stringify(value);
     const result = data => ({content: [{type: 'text', text: JSON.stringify(data, null, 2)}], structuredContent: data});
     const safe = fn => async args => {
@@ -58,6 +53,13 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
         return output;
     }
 
+    async function searchControls(query, type = null, limit = 20) {
+        const needle = String(query || '').trim().toLowerCase();
+        const controls = await listControls(type);
+        if (!needle) return controls.slice(0, limit);
+        return controls.filter(control => JSON.stringify(control).toLowerCase().includes(needle)).slice(0, limit);
+    }
+
     const summarizeNode = node => {
         if (!node) return '(always)';
         if (node.type === 'condition') {
@@ -71,7 +73,6 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
     };
 
     function explanation(type, control) {
-        if (!control) return null;
         if (type === 'toggle') return `${control.title || control.botName} (${control.botName}) is currently ${control.status ? 'enabled' : 'disabled'}. ${control.description || 'No description is stored.'}`;
         if (type === 'value') return `${control.key} is currently ${JSON.stringify(control.value)}${control.botName && control.botName !== 'none' ? ` for ${control.botName}` : ''}. ${control.description || 'No description is stored.'}`;
         const rules = (control.rules || []).map((rule, index) => `${index + 1}. ${rule.name || `Rule ${index + 1}`}: ${summarizeNode(rule.when)} => ${JSON.stringify(rule.result || {})}`).join('\n');
@@ -166,21 +167,28 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
     function buildServer() {
         const server = new McpServer(
             {name: 'simple-toggle', version: '1.0.0'},
-            {instructions: 'Manage Simple Toggle toggles, values, and condition mappers. Stored descriptions explain intended meaning and should be treated as the source of truth. Use list_controls/get_control when a requested control is ambiguous. You may create, change, flip, delete, inspect history, and revert controls when the user asks.'}
+            {instructions: 'Manage Simple Toggle toggles, values, and condition mappers. Stored descriptions explain intended meaning and should be treated as the source of truth. Search or list controls before guessing a key. You may create, change, flip, delete, inspect history, and revert controls when the user asks.'}
         );
-
         const controlType = z.enum(['toggle', 'value', 'mapper']);
+        const readOnly = {readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false};
+        const mutate = {readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false};
 
         server.registerTool('list_controls', {
             title: 'List Simple Toggle controls',
-            description: 'List toggles, values, and condition mappers, including current state/value and descriptions. Use this to discover what can be changed.',
-            inputSchema: z.object({type: controlType.optional()})
+            description: 'List toggles, values, and condition mappers, including current state/value and descriptions.',
+            inputSchema: z.object({type: controlType.optional()}), annotations: readOnly
         }, safe(async ({type}) => ({controls: await listControls(type || null)})));
+
+        server.registerTool('search_controls', {
+            title: 'Search controls',
+            description: 'Search keys, titles, descriptions, current values, and mapper definitions. Prefer this when the user refers to a control by meaning instead of exact key.',
+            inputSchema: z.object({query: z.string(), type: controlType.optional(), limit: z.number().int().min(1).max(100).optional()}), annotations: readOnly
+        }, safe(async ({query, type, limit}) => ({controls: await searchControls(query, type || null, limit || 20)})));
 
         server.registerTool('get_control', {
             title: 'Get a control',
             description: 'Read one control in full. id can be a toggle key, value token/key, or mapper token/key.',
-            inputSchema: z.object({type: controlType, id: z.string().min(1)})
+            inputSchema: z.object({type: controlType, id: z.string().min(1)}), annotations: readOnly
         }, safe(async ({type, id}) => {
             const control = await findControl(type, id);
             if (!control) throw new Error(`${type} control not found: ${id}`);
@@ -189,8 +197,8 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
 
         server.registerTool('explain_control', {
             title: 'Explain a control',
-            description: 'Return a human-readable explanation based on the stored description, current state/value, and mapper rules.',
-            inputSchema: z.object({type: controlType, id: z.string().min(1)})
+            description: 'Explain intended meaning from the stored description plus current state/value and mapper rules.',
+            inputSchema: z.object({type: controlType, id: z.string().min(1)}), annotations: readOnly
         }, safe(async ({type, id}) => {
             const control = await findControl(type, id);
             if (!control) throw new Error(`${type} control not found: ${id}`);
@@ -199,43 +207,42 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
 
         server.registerTool('create_control', {
             title: 'Create a control',
-            description: 'Create a toggle, value, or mapper. For value use value/bot_name. For mapper use example/rules. Descriptions should explain what the control means to future humans and AIs.',
-            inputSchema: z.object({type: controlType, key: z.string().min(1), title: z.string().optional(), description: z.string().optional(), status: z.boolean().optional(), value: z.any().optional(), bot_name: z.string().optional(), example: z.record(z.string(), z.any()).optional(), rules: z.array(z.any()).optional()})
+            description: 'Create a toggle, value, or mapper. Add a useful description so humans and future AIs know what it controls.',
+            inputSchema: z.object({type: controlType, key: z.string().min(1), title: z.string().optional(), description: z.string().optional(), status: z.boolean().optional(), value: z.any().optional(), bot_name: z.string().optional(), example: z.record(z.string(), z.any()).optional(), rules: z.array(z.any()).optional()}), annotations: mutate
         }, safe(createControl));
 
         server.registerTool('update_control', {
             title: 'Update any control',
-            description: 'Change any editable property of a control. Toggle patch supports status/enabled/title/description; value supports key/value/description/status/bot_name; mapper supports key/title/description/example/rules.',
-            inputSchema: z.object({type: controlType, id: z.string().min(1), patch: z.record(z.string(), z.any())})
+            description: 'Change any editable property. Toggle: status/enabled/title/description. Value: key/value/description/status/bot_name. Mapper: key/title/description/example/rules.',
+            inputSchema: z.object({type: controlType, id: z.string().min(1), patch: z.record(z.string(), z.any())}), annotations: mutate
         }, safe(updateControl));
 
         server.registerTool('flip_toggle', {
             title: 'Flip or set a toggle',
             description: 'Turn a toggle on, off, or invert its current state.',
-            inputSchema: z.object({id: z.string().min(1), mode: z.enum(['on', 'off', 'flip']).default('flip')})
+            inputSchema: z.object({id: z.string().min(1), mode: z.enum(['on', 'off', 'flip']).default('flip')}), annotations: mutate
         }, safe(async ({id, mode}) => {
             const current = await findControl('toggle', id);
             if (!current) throw new Error(`Toggle not found: ${id}`);
-            const status = mode === 'flip' ? !current.status : mode === 'on';
-            return updateControl({type: 'toggle', id: current.botName, patch: {status}});
+            return updateControl({type: 'toggle', id: current.botName, patch: {status: mode === 'flip' ? !current.status : mode === 'on'}});
         }));
 
         server.registerTool('set_value', {
             title: 'Set a value control',
             description: 'Set the current value of a value control by permanent token or key.',
-            inputSchema: z.object({id: z.string().min(1), value: z.any()})
+            inputSchema: z.object({id: z.string().min(1), value: z.any()}), annotations: mutate
         }, safe(async ({id, value}) => updateControl({type: 'value', id, patch: {value, status: true}})));
 
         server.registerTool('delete_control', {
             title: 'Delete a control',
-            description: 'Delete a toggle, value, or mapper. The deletion is recorded in history and can be reverted later.',
-            inputSchema: z.object({type: controlType, id: z.string().min(1)})
+            description: 'Delete a toggle, value, or mapper. Deletion is recorded and can be restored through history.',
+            inputSchema: z.object({type: controlType, id: z.string().min(1)}), annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false}
         }, safe(deleteControl));
 
         server.registerTool('evaluate_mapper', {
             title: 'Evaluate a condition mapper',
-            description: 'Run an input JSON object through a mapper using first-match priority. Set merge=true to merge the result over the input.',
-            inputSchema: z.object({id: z.string().min(1), input: z.record(z.string(), z.any()), merge: z.boolean().optional()})
+            description: 'Run input JSON through a mapper using first-match priority. Set merge=true to merge the result over the input.',
+            inputSchema: z.object({id: z.string().min(1), input: z.record(z.string(), z.any()), merge: z.boolean().optional()}), annotations: readOnly
         }, safe(async ({id, input, merge}) => {
             const mapper = await findControl('mapper', id);
             if (!mapper) throw new Error(`Mapper not found: ${id}`);
@@ -245,14 +252,14 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
 
         server.registerTool('list_history', {
             title: 'List control history',
-            description: 'List recent changes with timestamps, source, before state, and after state. History rolls at about 100 entries per control.',
-            inputSchema: z.object({type: controlType.optional(), id: z.string().optional(), limit: z.number().int().min(1).max(500).optional()})
+            description: 'List recent changes with timestamp, source, before state, and after state. History rolls per control.',
+            inputSchema: z.object({type: controlType.optional(), id: z.string().optional(), limit: z.number().int().min(1).max(500).optional()}), annotations: readOnly
         }, safe(async args => ({history: await history.list(args)})));
 
         server.registerTool('revert_change', {
             title: 'Revert a historical change',
-            description: 'Restore the control to the BEFORE snapshot of a history entry. This can also restore a deleted widget or undo a creation.',
-            inputSchema: z.object({history_id: z.number().int().positive()})
+            description: 'Restore the BEFORE snapshot of a history entry. This can restore a deleted widget or undo a creation/update.',
+            inputSchema: z.object({history_id: z.number().int().positive()}), annotations: mutate
         }, safe(async ({history_id}) => {
             const reverted = await history.revert(history_id, 'mcp');
             if (!reverted) throw new Error(`History entry not found: ${history_id}`);
@@ -275,19 +282,23 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
         } catch { return false; }
     };
 
-    app.all('/mcp', async (req, res) => {
+    app.post('/mcp', async (req, res) => {
         if (!originAllowed(req)) return res.status(403).json({error: 'Origin not allowed.'});
         const server = buildServer();
-        const transport = new StreamableHTTPServerTransport({sessionIdGenerator: undefined});
-        res.on('close', () => { Promise.resolve(transport.close()).catch(() => {}); Promise.resolve(server.close()).catch(() => {}); });
         try {
+            const transport = new StreamableHTTPServerTransport({sessionIdGenerator: undefined});
             await server.connect(transport);
             await transport.handleRequest(req, res, req.body);
+            res.on('close', () => { Promise.resolve(transport.close()).catch(() => {}); Promise.resolve(server.close()).catch(() => {}); });
         } catch (err) {
             console.error('MCP request failed:', err);
             if (!res.headersSent) res.status(500).json({jsonrpc: '2.0', error: {code: -32603, message: 'Internal MCP server error'}, id: null});
         }
     });
 
-    return {buildServer, listControls, findControl};
+    const methodNotAllowed = (req, res) => res.status(405).json({jsonrpc: '2.0', error: {code: -32000, message: 'Method not allowed.'}, id: null});
+    app.get('/mcp', methodNotAllowed);
+    app.delete('/mcp', methodNotAllowed);
+
+    return {buildServer, listControls, searchControls, findControl};
 };
