@@ -5,12 +5,22 @@
 The important architecture is: **fetch configuration once, evaluate every row locally**.
 
 ```java
-SimpleToggleMapper simpleToggle = new SimpleToggleMapper("https://toggle.example.com");
+SimpleToggleMapper simpleToggle = new SimpleToggleMapper(
+    "https://toggle.example.com",
+    System.getenv("SIMPLE_TOGGLE_TOKEN")
+);
+
 SimpleToggleMapper.MapperDefinition mapper = simpleToggle.getMapper("kish-orders-coupons");
 
 for (Map<String, Object> order : orders) {
     mapper.apply(order); // local only: no HTTP here
 }
+```
+
+The second constructor argument is the normal Simple Toggle admin token. `getMapper(key)` and `refreshMapper(key)` send it as:
+
+```text
+Authorization: Bearer <token>
 ```
 
 Or keep the input unchanged:
@@ -30,6 +40,23 @@ mapper = simpleToggle.refreshMapper("kish-orders-coupons");
 `refreshMapper` sends `If-None-Match`; unchanged definitions return HTTP `304`, so the existing cached instance is reused.
 
 You choose when refresh happens: once per import, once every N minutes, application startup, etc. Row processing never depends on Simple Toggle being reachable.
+
+## Permanent mapper token mode
+
+If you already have the mapper's permanent mapper token, you can use it as the credential without the global admin token:
+
+```java
+SimpleToggleMapper simpleToggle = new SimpleToggleMapper("https://toggle.example.com");
+SimpleToggleMapper.MapperDefinition mapper = simpleToggle.getMapperByToken(mapperToken);
+```
+
+So the split is:
+
+```text
+getMapper("mapper-key")          -> requires global admin Bearer token
+refreshMapper("mapper-key")      -> requires global admin Bearer token
+getMapperByToken(mapperToken)     -> mapper token itself is the credential
+```
 
 ## Supported rules
 
@@ -75,15 +102,21 @@ CONTINUE
 
 The Java evaluator executes that entirely in memory for every order.
 
-## Public mapper definition URLs
+## Mapper definition URLs
 
-Definitions can also be fetched directly without the admin token:
+Key-based lookup requires the normal admin token:
 
 ```text
 GET /m/key/<mapper-key>
+Authorization: Bearer <admin-token>
+```
+
+A permanent mapper token can be fetched directly because the token itself is the credential:
+
+```text
 GET /m/<permanent-mapper-token>
 ```
 
-They return `ETag` and `Last-Modified` headers for clean caching/revalidation.
+Both return `ETag` and `Last-Modified` headers for clean caching/revalidation.
 
 Server-side `POST /m/<token>` still exists for debugging/testing, but it is not required for production row processing.
