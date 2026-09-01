@@ -4,6 +4,7 @@
   "hostname": "127.0.0.1",
   "unixPath": "",
   "token": "1234567890",
+  "historyLimit": 100,
   "knex": {
     "client": "sqlite3",
     "connection": {

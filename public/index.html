@@ -7,11 +7,12 @@
     <title>Simple Toggle</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/mapper.css">
+    <link rel="stylesheet" href="css/history.css">
 </head>
 <body>
 <div class="app-shell">
     <header class="topbar">
-        <div><div class="eyebrow">CONTROL PANEL</div><h1>Simple Toggle</h1><p class="subtitle">Toggles, values, and condition mappers in one place.</p></div>
+        <div><div class="eyebrow">CONTROL PANEL</div><h1>Simple Toggle</h1><p class="subtitle">Toggles, values, condition mappers, history, and MCP in one place.</p></div>
         <div class="topbar-actions"><input id="search-input" class="search-input" type="search" placeholder="Search controls…" autocomplete="off"><button id="change-token-button" class="button button-secondary" type="button">Change token</button></div>
     </header>
     <div id="global-error" class="alert alert-error" hidden></div>
@@ -19,12 +20,20 @@
         <button class="tab-button active" data-tab="bots" type="button">Toggles <span id="bot-count" class="count">0</span></button>
         <button class="tab-button" data-tab="values" type="button">Values <span id="value-count" class="count">0</span></button>
         <button class="tab-button" data-tab="mappers" type="button">Mappers <span id="mapper-count" class="count">0</span></button>
+        <button class="tab-button admin-only" data-tab="history" type="button">History</button>
         <button class="tab-button admin-only" data-tab="notifications" type="button">Notifications</button>
     </nav>
     <main>
         <section id="tab-bots" class="tab-panel active"><div class="section-heading"><div><h2>Bot toggles</h2><p>Switch bot states on or off.</p></div><button id="open-create-toggle" class="button button-primary" type="button">+ New toggle</button></div><div id="bots-loading" class="state-card">Loading toggles…</div><div id="bots-empty" class="state-card" hidden>No toggle widgets yet.</div><div id="bot-control-panel" class="control-grid"></div></section>
         <section id="tab-values" class="tab-panel"><div class="section-heading"><div><h2>Value controls</h2><p>All generated single-value controls stored by the server.</p></div><button id="open-create-value" class="button button-primary" type="button">+ New value</button></div><div id="values-loading" class="state-card">Loading value controls…</div><div id="values-empty" class="state-card" hidden>No generated value controls yet.</div><div id="value-control-panel" class="control-grid"></div></section>
         <section id="tab-mappers" class="tab-panel"><div class="section-heading"><div><h2>Condition mappers</h2><p>Ordered rules that map incoming JSON objects to result objects.</p></div><button id="open-create-mapper" class="button button-primary" type="button">+ New mapper</button></div><div id="mappers-loading" class="state-card">Loading condition mappers…</div><div id="mappers-empty" class="state-card" hidden>No condition mappers yet.</div><div id="mapper-control-panel" class="control-grid"></div></section>
+        <section id="tab-history" class="tab-panel admin-only">
+            <div class="section-heading"><div><h2>Change history</h2><p>Rolling before/after snapshots. Reverting a deletion restores the widget.</p></div><button id="refresh-history" class="button button-secondary" type="button">Refresh</button></div>
+            <div class="mcp-card"><h3>MCP endpoint</h3><p>Unauthenticated Streamable HTTP endpoint. Give this URL directly to an MCP client.</p><div class="value-row"><input id="mcp-endpoint" readonly><button id="copy-mcp-endpoint" class="button button-primary" type="button">Copy</button></div></div>
+            <div id="history-loading" class="state-card" hidden>Loading history…</div>
+            <div id="history-empty" class="state-card" hidden>No changes recorded yet.</div>
+            <div class="history-table-wrap"><table class="history-table"><thead><tr><th>Time</th><th>Control</th><th>Action</th><th>From → To</th><th>Actions</th></tr></thead><tbody id="history-rows"></tbody></table></div>
+        </section>
         <section id="tab-notifications" class="tab-panel admin-only"><div class="section-heading"><div><h2>Notifications</h2><p>Uptime Kuma dashboard.</p></div></div><iframe class="dashboard-frame" src="/dashboard" title="Notifications dashboard"></iframe></section>
     </main>
 </div>
@@ -34,6 +43,6 @@
 <div id="mapper-editor-modal" class="modal" hidden><div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="mapper-editor-title"><div class="modal-header"><h2 id="mapper-editor-title">Condition mapper</h2><button class="icon-button mapper-close-modal" type="button" aria-label="Close">×</button></div><div class="mapper-meta-grid"><label>Key<input id="mapper-key-input" autocomplete="off"></label><label>Title<input id="mapper-title-input" autocomplete="off"></label><label class="mapper-meta-wide">Description<textarea id="mapper-description-input" rows="2"></textarea></label><label class="mapper-meta-wide">Example object<textarea id="mapper-example-input" class="code-input" rows="10" spellcheck="false"></textarea></label><label class="mapper-meta-wide">Runtime URL<div class="value-row"><input id="mapper-runtime-url" readonly><button id="copy-mapper-runtime" class="button button-secondary" type="button">Copy</button></div></label></div><div class="mapper-toolbar"><div><h3>Rules</h3><p>Higher rules win. The first matching rule returns its result.</p></div><div class="card-actions"><button id="test-mapper" class="button button-secondary" type="button">Test example</button><button id="add-mapper-rule" class="button button-primary" type="button">+ Add rule</button></div></div><div class="mapper-table-wrap"><table class="mapper-table"><thead><tr><th>Priority</th><th>Conditions</th><th>Result</th><th>Actions</th></tr></thead><tbody id="mapper-rules-body"></tbody></table></div><div id="mapper-rules-empty" class="state-card mapper-empty-small">No rules yet.</div><pre id="mapper-test-output" class="test-output"></pre><div class="modal-actions"><button class="button button-secondary mapper-close-modal" type="button">Close</button><button id="save-mapper" class="button button-primary" type="button">Save mapper</button></div></div></div>
 <div id="mapper-rule-modal" class="modal mapper-rule-modal" hidden><div class="modal-card modal-card-wide" role="dialog" aria-modal="true" aria-labelledby="mapper-rule-title"><div class="modal-header"><h2 id="mapper-rule-title">Rule</h2><button class="icon-button mapper-close-modal" type="button" aria-label="Close">×</button></div><form id="mapper-rule-form"><label>Rule name <span class="field-help-inline">optional</span><input id="mapper-rule-name" autocomplete="off" placeholder="Japan large order"></label><div><div class="field-label">Conditions</div><div id="mapper-condition-tree" class="condition-tree"></div></div><label>Result object<textarea id="mapper-rule-result" class="code-input" rows="7" spellcheck="false">{}</textarea></label><div class="modal-actions"><button class="button button-secondary mapper-close-modal" type="button">Cancel</button><button class="button button-primary" type="submit">Save rule</button></div></form></div></div>
 <datalist id="mapper-field-options"></datalist>
-<script src="js/index.js"></script><script src="js/mapper.js"></script>
+<script src="js/index.js"></script><script src="js/mapper.js"></script><script src="js/history.js"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 # Simple Toggle
 
-A tiny authenticated server for remote toggles and single-value controls, with a web UI and Node.js client.
+A tiny control server for remote toggles, editable values, and condition mappers, with a web UI, Node.js client, change history, and MCP support.
 
 ## Client
 
@@ -108,11 +108,9 @@ You can also create a brand-new value control and its temporary link in one call
 const crm = new BotControl('crm');
 const link = await crm.generateTemporaryUrl('customer_reply', 'Reply from customer');
 
-console.log(link.permanent_access_token); // keep this
-console.log(link.temporary_url);          // give this to the one-time setter
+console.log(link.permanent_access_token);
+console.log(link.temporary_url);
 ```
-
-The web UI exposes the same split with **Permanent URL** and **One-time link** actions on every Value card.
 
 ### Toggles
 
@@ -124,17 +122,57 @@ await worker.disable();
 const status = await worker.getStatus();
 ```
 
-### Generate a value control
+### Condition mappers
+
+A mapper accepts an input JSON object and returns the result from the first matching rule. Rules are ordered by priority and can contain nested AND/OR groups.
 
 ```js
-const worker = new BotControl('worker-name');
-const link = await worker.generateUrl('message', 'Message shown by the worker', 'hello');
+const mapper = await BotControl.createMapper({
+  key: 'order-coupon',
+  description: 'Selects the coupon used when importing an order.',
+  example: {destination: 'jpn', total: 120},
+  rules: [{
+    name: 'Japan',
+    when: {type: 'condition', field: 'destination', operator: 'eq', value: 'jpn'},
+    result: {coupon: 'japan'}
+  }]
+});
 
-console.log(link.permanent_access_token);
-console.log(link.user_url);
-console.log(link.get_value_url);
-console.log(link.set_value_url);
+const result = await BotControl.map(mapper.token, {destination: 'jpn', total: 50});
 ```
+
+The web UI builds field helpers automatically from the mapper's example object.
+
+## MCP
+
+The server exposes an **unauthenticated** Streamable HTTP MCP endpoint:
+
+```text
+https://toggle.example.com/mcp
+```
+
+There is intentionally no bearer token, API key, or OAuth requirement on this endpoint. Anyone who can reach `/mcp` can inspect, create, modify, flip, delete, and restore controls. Put the server behind a network boundary if that is not acceptable for your deployment.
+
+The MCP server exposes these tools:
+
+- `list_controls` / `search_controls` / `get_control`
+- `explain_control` — explains meaning from the stored description and current state/value
+- `create_control` / `update_control` / `delete_control`
+- `flip_toggle` / `set_value`
+- `evaluate_mapper`
+- `list_history` / `revert_change`
+
+It also exposes `simple-toggle://controls` and `simple-toggle://history` resources.
+
+The web UI's **History** tab shows the exact MCP URL with a copy button.
+
+## Change history
+
+Changes made through the normal API/web UI, permanent value URLs, one-time value links, and MCP are recorded as before/after snapshots with a timestamp and source.
+
+History is rolling per control and defaults to the newest 100 entries. Change `historyLimit` in `config/default.json` to keep more or fewer.
+
+The **History** tab shows compact `from → to` changes plus full JSON snapshots. **Revert** restores the state from immediately before that history entry. This also means a deleted widget can be restored, and reverting a creation removes the widget again.
 
 ## Server
 
