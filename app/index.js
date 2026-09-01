@@ -6,6 +6,7 @@ const {createProxyMiddleware} = require('http-proxy-middleware');
 const rtg = require('random-token-generator');
 const {randomBytes} = require('crypto');
 const {existsSync, unlinkSync, chmodSync} = require('fs');
+const registerConditionMapper = require('./condition_mapper');
 const token = config.get('token');
 const configuredUrl = config.has('url') ? config.get('url') : '';
 const getBaseUrl = req => (configuredUrl || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
@@ -99,6 +100,8 @@ const verify_request = (req, res) => {
     return true;
 };
 
+registerConditionMapper({app, knex, verify_request, generateRandomToken, getBaseUrl});
+
 const buildValueControl = (req, randomToken) => {
     const now = new Date();
     return {
@@ -179,8 +182,6 @@ app.post('/bot/generate_link', async (req, res) => {
     }
 });
 
-// Permanent per-value access. The long value token itself is the credential.
-// It stays valid until the value control is deleted.
 app.get('/v/:token', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
@@ -190,15 +191,7 @@ app.get('/v/:token', async (req, res) => {
             res.set('Content-Type', 'text/plain');
             return res.send(row.value ?? '');
         }
-        res.json({
-            key: row.key,
-            value: row.value,
-            description: row.description,
-            status: row.status === 1,
-            botName: row.bot_name,
-            updatedAt: row.updated_at,
-            createdAt: row.created_at
-        });
+        res.json({key: row.key,value: row.value,description: row.description,status: row.status === 1,botName: row.bot_name,updatedAt: row.updated_at,createdAt: row.created_at});
     } catch (err) {
         console.log(err);
         res.status(500).json({error: 'Unable to retrieve value.'});
@@ -208,11 +201,7 @@ app.get('/v/:token', async (req, res) => {
 app.post('/v/:token', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
-        const updated = await knex('bot_single_value_control').where('token', req.params.token).update({
-            value: req.body?.value ?? '',
-            status: 1,
-            updated_at: new Date()
-        });
+        const updated = await knex('bot_single_value_control').where('token', req.params.token).update({value: req.body?.value ?? '',status: 1,updated_at: new Date()});
         if (!updated) return res.status(404).json({error: 'Invalid value access token.'});
         res.json({status: 'success'});
     } catch (err) {
@@ -226,37 +215,18 @@ app.post('/bot/temp_link/:token', async (req, res) => {
     try {
         const valueControl = await knex('bot_single_value_control').where('token', req.params.token).first();
         if (!valueControl) return res.status(404).json({error: 'Value control not found.'});
-
         const rawMinutes = req.body?.expires_in_minutes ?? DEFAULT_TEMP_LINK_MINUTES;
         const expiresInMinutes = Number(rawMinutes);
-        if (!Number.isFinite(expiresInMinutes) || expiresInMinutes < 0) {
-            return res.status(400).json({error: 'expires_in_minutes must be a number >= 0.'});
-        }
-
+        if (!Number.isFinite(expiresInMinutes) || expiresInMinutes < 0) return res.status(400).json({error: 'expires_in_minutes must be a number >= 0.'});
         let code;
         for (let i = 0; i < 5; i++) {
             const candidate = generateShortCode();
-            if (!await knex(TEMP_LINK_TABLE).where('code', candidate).first()) {
-                code = candidate;
-                break;
-            }
+            if (!await knex(TEMP_LINK_TABLE).where('code', candidate).first()) { code = candidate; break; }
         }
         if (!code) return res.status(500).json({error: 'Unable to generate a short link.'});
-
         const expiresAt = expiresInMinutes === 0 ? null : new Date(Date.now() + expiresInMinutes * 60 * 1000);
-        await knex(TEMP_LINK_TABLE).insert({
-            code,
-            value_token: req.params.token,
-            expires_at: expiresAt,
-            created_at: new Date()
-        });
-
-        res.json({
-            code,
-            url: `${getBaseUrl(req)}/t/${code}`,
-            expires_at: expiresAt,
-            one_time: true
-        });
+        await knex(TEMP_LINK_TABLE).insert({code,value_token: req.params.token,expires_at: expiresAt,created_at: new Date()});
+        res.json({code,url: `${getBaseUrl(req)}/t/${code}`,expires_at: expiresAt,one_time: true});
     } catch (err) {
         console.log(err);
         res.status(500).send(err);
@@ -268,20 +238,12 @@ app.get('/t/:code', async (req, res) => {
     try {
         const link = await getTemporaryLink(req.params.code);
         if (!link) return res.status(410).send(temporaryPage({title: 'Link expired', message: 'This one-time link is invalid, expired, or has already been used.', status: 410}));
-
         const valueControl = await knex('bot_single_value_control').where('token', link.value_token).first();
         if (!valueControl) {
             await knex(TEMP_LINK_TABLE).where('code', req.params.code).del();
             return res.status(410).send(temporaryPage({title: 'Link expired', message: 'The value control for this link no longer exists.', status: 410}));
         }
-
-        res.send(temporaryPage({
-            title: 'Set value',
-            code: req.params.code,
-            key: valueControl.key,
-            description: valueControl.description,
-            status: 200
-        }));
+        res.send(temporaryPage({title: 'Set value',code: req.params.code,key: valueControl.key,description: valueControl.description,status: 200}));
     } catch (err) {
         console.log(err);
         res.status(500).send(temporaryPage({title: 'Error', message: 'Unable to load this link.', status: 500}));
@@ -294,29 +256,18 @@ app.post('/t/:code', async (req, res) => {
         const result = await knex.transaction(async trx => {
             const link = await trx(TEMP_LINK_TABLE).where('code', req.params.code).first();
             if (!link) return {ok: false, reason: 'used'};
-            if (link.expires_at && new Date(link.expires_at).getTime() <= Date.now()) {
-                await trx(TEMP_LINK_TABLE).where('code', req.params.code).del();
-                return {ok: false, reason: 'expired'};
-            }
-
+            if (link.expires_at && new Date(link.expires_at).getTime() <= Date.now()) { await trx(TEMP_LINK_TABLE).where('code', req.params.code).del(); return {ok: false, reason: 'expired'}; }
             const claimed = await trx(TEMP_LINK_TABLE).where('code', req.params.code).del();
             if (claimed !== 1) return {ok: false, reason: 'used'};
-
-            const updated = await trx('bot_single_value_control').where('token', link.value_token).update({
-                value: req.body?.value ?? '',
-                status: 1,
-                updated_at: new Date()
-            });
+            const updated = await trx('bot_single_value_control').where('token', link.value_token).update({value: req.body?.value ?? '',status: 1,updated_at: new Date()});
             if (!updated) return {ok: false, reason: 'missing'};
             return {ok: true};
         });
-
         const wantsJson = req.is('application/json');
         if (!result.ok) {
             if (wantsJson) return res.status(410).json({error: 'This one-time link is invalid, expired, or already used.'});
             return res.status(410).send(temporaryPage({title: 'Link expired', message: 'This one-time link is invalid, expired, or has already been used.', status: 410}));
         }
-
         if (wantsJson) return res.json({status: 'success', consumed: true});
         res.send(temporaryPage({title: 'Value saved', message: 'The value was saved. This one-time link is now permanently invalid.', status: 201}));
     } catch (err) {
@@ -325,22 +276,14 @@ app.post('/t/:code', async (req, res) => {
     }
 });
 
-// Legacy admin-authenticated value endpoints kept for compatibility.
 app.post('/bot/set_value/:token', async (req, res) => {
     if (!verify_request(req, res)) return;
     try {
         const row = await knex('bot_single_value_control').where('token', req.params.token).first();
         if (!row) return res.status(404).send({error: 'Invalid token.'});
-        await knex('bot_single_value_control').where('token', req.params.token).update({
-            value: req.body.value,
-            status: 1,
-            updated_at: new Date()
-        });
+        await knex('bot_single_value_control').where('token', req.params.token).update({value: req.body.value,status: 1,updated_at: new Date()});
         res.json({status: 'success'});
-    } catch (err) {
-        console.log(err);
-        res.status(500).send(err);
-    }
+    } catch (err) { console.log(err); res.status(500).send(err); }
 });
 
 app.delete('/bot/delete_value/:token', async (req, res) => {
@@ -348,15 +291,9 @@ app.delete('/bot/delete_value/:token', async (req, res) => {
     try {
         const row = await knex('bot_single_value_control').where('token', req.params.token).first();
         if (!row) return res.status(404).send({error: 'Invalid token.'});
-        await knex.transaction(async trx => {
-            await trx(TEMP_LINK_TABLE).where('value_token', req.params.token).del();
-            await trx('bot_single_value_control').where('token', req.params.token).del();
-        });
+        await knex.transaction(async trx => { await trx(TEMP_LINK_TABLE).where('value_token', req.params.token).del(); await trx('bot_single_value_control').where('token', req.params.token).del(); });
         res.json({success: 'Value deleted successfully.'});
-    } catch (err) {
-        console.log(err);
-        res.status(500).send(err);
-    }
+    } catch (err) { console.log(err); res.status(500).send(err); }
 });
 
 app.get('/bot/get_value/:token', async (req, res) => {
@@ -364,52 +301,25 @@ app.get('/bot/get_value/:token', async (req, res) => {
     try {
         const row = await knex('bot_single_value_control').where('token', req.params.token).first();
         if (!row) return res.status(404).send({error: 'Invalid token.'});
-        if ((req.query.onlyvalue || req.query.only_value) === 'true') {
-            res.set('Content-Type', 'text/plain');
-            return res.send(row.value);
-        }
+        if ((req.query.onlyvalue || req.query.only_value) === 'true') { res.set('Content-Type', 'text/plain'); return res.send(row.value); }
         res.json(row);
-    } catch (err) {
-        console.log(err);
-        res.status(500).send(err);
-    }
+    } catch (err) { console.log(err); res.status(500).send(err); }
 });
 
 app.get('/bot/values', async (req, res) => {
     if (!verify_request(req, res)) return;
     try {
         const rows = await knex.select('*').from('bot_single_value_control').orderBy('created_at', 'desc');
-        res.json(rows.map(row => ({
-            key: row.key,
-            value: row.value,
-            description: row.description,
-            status: row.status === 1,
-            token: row.token,
-            accessToken: row.token,
-            botName: row.bot_name,
-            updatedAt: row.updated_at,
-            createdAt: row.created_at
-        })));
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send({error: 'Unable to retrieve value controls.'});
-    }
+        res.json(rows.map(row => ({key: row.key,value: row.value,description: row.description,status: row.status === 1,token: row.token,accessToken: row.token,botName: row.bot_name,updatedAt: row.updated_at,createdAt: row.created_at})));
+    } catch (err) { console.error(err.message); res.status(500).send({error: 'Unable to retrieve value controls.'}); }
 });
 
 app.get('/bots', async (req, res) => {
     if (!verify_request(req, res)) return;
     try {
         const rows = await knex.select('*').from('bot_control').orderBy('bot_name');
-        res.json(rows.map(row => ({
-            botName: row.bot_name,
-            title: row.title,
-            description: row.description,
-            status: row.status === 1
-        })));
-    } catch (err) {
-        console.error(err.message);
-        res.status(500).send({error: 'Unable to retrieve bot controls.'});
-    }
+        res.json(rows.map(row => ({botName: row.bot_name,title: row.title,description: row.description,status: row.status === 1})));
+    } catch (err) { console.error(err.message); res.status(500).send({error: 'Unable to retrieve bot controls.'}); }
 });
 
 app.get('/bot/:botName', async (req, res) => {
@@ -418,22 +328,14 @@ app.get('/bot/:botName', async (req, res) => {
         const row = await knex('bot_control').where('bot_name', req.params.botName).first();
         if (!row) return res.status(404).send({code: 404, error: 'Bot not found.'});
         res.json({botName: row.bot_name, status: Boolean(row.status)});
-    } catch (err) {
-        res.status(500).send({error: 'An error occurred while retrieving bot status.'});
-    }
+    } catch (err) { res.status(500).send({error: 'An error occurred while retrieving bot status.'}); }
 });
 
 app.post('/bot/:bot_name', async (req, res) => {
     if (!verify_request(req, res)) return;
     try {
         const botName = req.params.bot_name;
-        const data = {
-            bot_name: botName,
-            title: req.body.title,
-            description: req.body.description,
-            status: req.body.status ? 1 : 0,
-            updated_at: new Date()
-        };
+        const data = {bot_name: botName,title: req.body.title,description: req.body.description,status: req.body.status ? 1 : 0,updated_at: new Date()};
         const row = await knex('bot_control').where('bot_name', botName).first();
         if (row) {
             const update = {status: data.status, updated_at: data.updated_at};
@@ -445,21 +347,13 @@ app.post('/bot/:bot_name', async (req, res) => {
             await knex('bot_control').insert(data);
         }
         res.json({status: Boolean(data.status)});
-    } catch (err) {
-        console.log(err);
-        res.status(500).send(err);
-    }
+    } catch (err) { console.log(err); res.status(500).send(err); }
 });
 
 app.delete('/bot/:bot_name', async (req, res) => {
     if (!verify_request(req, res)) return;
-    try {
-        await knex('bot_control').where('bot_name', req.params.bot_name).del();
-        res.json({status: 'success'});
-    } catch (err) {
-        console.log(err);
-        res.status(500).send(err);
-    }
+    try { await knex('bot_control').where('bot_name', req.params.bot_name).del(); res.json({status: 'success'}); }
+    catch (err) { console.log(err); res.status(500).send(err); }
 });
 
 const wsProxy = createProxyMiddleware({target: 'http://kuma', changeOrigin: true, ws: true, logger: console});
@@ -475,14 +369,8 @@ const unixPath = config.has('unixPath') ? config.get('unixPath') : null;
 
 if (unixPath) {
     if (existsSync(unixPath)) unlinkSync(unixPath);
-    app.listen(unixPath, () => {
-        console.log(`Server running on unix socket at ${unixPath}`);
-        chmodSync(unixPath, '777');
-    });
+    app.listen(unixPath, () => { console.log(`Server running on unix socket at ${unixPath}`); chmodSync(unixPath, '777'); });
 }
 
-if (port && hostname) {
-    app.listen(port, hostname, () => console.log(`Server running on port ${port}`));
-} else if (port) {
-    app.listen(port, () => console.log(`Server running on port ${port}`));
-}
+if (port && hostname) app.listen(port, hostname, () => console.log(`Server running on port ${port}`));
+else if (port) app.listen(port, () => console.log(`Server running on port ${port}`));

@@ -36,6 +36,53 @@ export interface TemporarySetLink extends ApiResult {
     one_time?: boolean;
 }
 
+export type MapperOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains' | 'starts_with' | 'ends_with' | 'in' | 'not_in' | 'exists' | 'empty' | 'not_empty';
+
+export interface MapperCondition {
+    type: 'condition';
+    field: string;
+    operator: MapperOperator;
+    value?: any;
+}
+
+export interface MapperGroup {
+    type: 'group';
+    op: 'and' | 'or';
+    children: Array<MapperGroup | MapperCondition>;
+}
+
+export interface MapperRule {
+    name?: string;
+    when: MapperGroup | MapperCondition;
+    result: Record<string, any>;
+}
+
+export interface ConditionMapper {
+    key: string;
+    title?: string;
+    description?: string;
+    token: string;
+    accessToken?: string;
+    runtimeUrl?: string;
+    example: Record<string, any>;
+    rules: MapperRule[];
+    updatedAt?: string;
+    createdAt?: string;
+}
+
+export interface MapperConfig {
+    key: string;
+    title?: string;
+    description?: string;
+    example?: Record<string, any>;
+    rules?: MapperRule[];
+}
+
+export interface MapperOptions {
+    merge?: boolean;
+    meta?: boolean;
+}
+
 export default class BotControl {
     static url: string;
     static token: string;
@@ -60,6 +107,19 @@ export default class BotControl {
     static getPermanentValueUrl(valueToken: string, onlyValue?: boolean): string;
     static createTemporarySetUrl(valueToken: string, expiresInMinutes?: number): Promise<TemporarySetLink>;
     static createTemporarySetUrlByKey(key: string, botName?: string | null, expiresInMinutes?: number): Promise<TemporarySetLink>;
+
+    static getMappers(): Promise<ConditionMapper[]>;
+    static findMapper(key: string): Promise<ConditionMapper | null>;
+    static createMapper(config: MapperConfig): Promise<ApiResult>;
+    static updateMapper(mapperToken: string, config: Partial<MapperConfig>): Promise<ApiResult>;
+    static deleteMapper(mapperToken: string): Promise<ApiResult>;
+    static getMapperUrl(mapperToken: string, options?: MapperOptions): string;
+    static mapRequest(mapperToken: string, input: Record<string, any>, options?: MapperOptions): Promise<ApiResult>;
+    static map(mapperToken: string, input: Record<string, any>, options?: MapperOptions): Promise<any>;
+    static applyMap(mapperToken: string, input: Record<string, any>): Promise<Record<string, any>>;
+    static mapByKey(key: string, input: Record<string, any>, options?: MapperOptions): Promise<any>;
+    static applyMapByKey(key: string, input: Record<string, any>): Promise<Record<string, any>>;
+
     static getBots(): Promise<BotStatus[]>;
 
     generateUrl(key: string, description?: string, value?: any): Promise<ApiResult & {
