@@ -2,6 +2,151 @@ const {McpServer} = require('@modelcontextprotocol/sdk/server/mcp.js');
 const {StreamableHTTPServerTransport} = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
 const {z} = require('zod');
 
+const MCP_GUIDE = `
+# Simple Toggle MCP operating guide
+
+You are connected to Simple Toggle, a small remote-control server. Your job is to understand the controls from their stored metadata and carry out the user's intent with as few follow-up questions as possible.
+
+## Core behavior
+- Do not guess exact control keys when the user describes a control semantically. Use search_controls first.
+- Stored descriptions are the source of truth for what a control means. Titles/keys help discovery; descriptions explain intent.
+- If a semantic search produces one clear match, use it. Do not ask the user to repeat the exact key.
+- If several controls are genuinely plausible and changing the wrong one would matter, ask which one. Otherwise proceed with the strongest match.
+- Read operations never change state. Mutating tools write to rolling history automatically.
+- Prefer the specific convenience tools for common actions: flip_toggle for toggles and set_value for values.
+- Use update_control when changing metadata or mapper definitions.
+- Before deleting something, identify it confidently. Deletions are reversible through history, but are still destructive.
+- When a user says "turn X on/off", use mode "on"/"off"; use mode "flip" only when they explicitly mean invert/toggle.
+- When a user says "set X to Y", search for the value control and call set_value. set_value also marks the value control status active.
+- When explaining a control, include the stored description, current state/value, and for mappers the ordered rules.
+
+## Control types
+
+### toggle
+A boolean switch.
+Identifier: the exact botName/key.
+Fields: botName, title, description, status.
+status=true means enabled/on; false means disabled/off.
+Use flip_toggle for ordinary on/off/invert requests.
+
+### value
+A remotely editable single value.
+Identifier: either its permanent token or its key. If a key is duplicated, key lookup resolves the newest matching value; use search_controls/get_control when that distinction matters.
+Fields: key, value, description, status, token, botName.
+The backing database stores value as text. MCP non-string values are JSON-serialized before storage; strings remain strings.
+Use set_value for ordinary value changes.
+botName is optional grouping metadata and defaults to "none".
+
+### mapper
+An ordered first-match condition mapper.
+Identifier: either its permanent token or its key. Duplicate keys resolve newest-first.
+Fields: key, title, description, token, example, rules.
+Input is a JSON object. Rules are evaluated top-to-bottom. The first matching rule wins. If nothing matches, the result is {}.
+
+Mapper rule shape:
+{
+  "name": "optional human name",
+  "when": <condition or group>,
+  "result": {"any": "JSON object"}
+}
+
+Condition shape:
+{
+  "type": "condition",
+  "field": "destination",
+  "operator": "eq",
+  "value": "jpn"
+}
+
+Group shape:
+{
+  "type": "group",
+  "op": "and",
+  "children": [<condition/group>, ...]
+}
+
+Nested groups are allowed. "op" is "and" or "or".
+An empty AND group matches always. An empty OR group matches never.
+Field lookup supports dot paths such as "customer.type" and array indexes such as "items.0.sku".
+
+Supported mapper operators:
+- eq: equality
+- neq: inequality
+- gt / gte / lt / lte: numeric comparison when both sides are numeric-like, otherwise string comparison
+- contains: substring for strings; membership for arrays
+- starts_with / ends_with: string prefix/suffix
+- in / not_in: expected value may be an array or comma-separated list
+- exists: field is neither null nor undefined
+- empty: null, undefined, "", [], or {} is empty
+- not_empty: inverse of empty
+
+Operators exists/empty/not_empty do not need a value.
+The example object is documentation/UI assistance; it provides field names and sample values but does not limit runtime inputs.
+
+## Mapper examples
+
+Single condition:
+{
+  "name": "Japan",
+  "when": {"type":"condition","field":"destination","operator":"eq","value":"jpn"},
+  "result": {"coupon":"japan"}
+}
+
+Nested logic:
+{
+  "name": "Large Japan order",
+  "when": {
+    "type":"group",
+    "op":"and",
+    "children":[
+      {"type":"condition","field":"destination","operator":"eq","value":"jpn"},
+      {
+        "type":"group",
+        "op":"or",
+        "children":[
+          {"type":"condition","field":"total","operator":"gte","value":100},
+          {"type":"condition","field":"customer.type","operator":"eq","value":"vip"}
+        ]
+      }
+    ]
+  },
+  "result":{"coupon":"japan-priority"}
+}
+
+## History and revert
+History stores before/after snapshots, timestamp, action, and source.
+Typical sources include api, permanent, temporary, mcp, web, and revert.
+History rolls per control according to server configuration.
+revert_change restores the BEFORE snapshot of the selected history entry:
+- reverting an update restores the old state/value/configuration
+- reverting a delete recreates the deleted widget
+- reverting a create removes the widget
+The revert itself creates another history entry, so it is auditable and can itself be reasoned about later.
+
+## Tool choice
+- list_controls: inventory by optional type.
+- search_controls: best first call when the user describes a control by meaning/name/value rather than exact id.
+- get_control: full current object once you know type + id.
+- explain_control: human-readable meaning/current state.
+- create_control: create toggle/value/mapper.
+- update_control: edit metadata, arbitrary value fields, or mapper example/rules.
+- flip_toggle: on/off/invert boolean switches.
+- set_value: change a single value.
+- delete_control: delete any control.
+- evaluate_mapper: test/run a mapper without editing it.
+- list_history: inspect prior changes.
+- revert_change: restore the before-state of a history entry.
+- get_guide: return this guide verbatim when you need protocol/domain details.
+
+## Resources
+- simple-toggle://guide: this operating guide
+- simple-toggle://controls: full current control inventory
+- simple-toggle://history: recent history
+
+## Authentication/security
+The /mcp endpoint is intentionally unauthenticated. Do not look for or ask the user for API keys, bearer tokens, OAuth credentials, or headers for MCP. If you can reach the MCP endpoint, you may use it.
+`.trim();
+
 module.exports = ({app, knex, history, mapperApi, generateRandomToken, configuredUrl = '', temporaryLinkTable = 'bot_temporary_value_link'}) => {
     const valueForDb = value => typeof value === 'string' ? value : JSON.stringify(value);
     const result = data => ({content: [{type: 'text', text: JSON.stringify(data, null, 2)}], structuredContent: data});
@@ -68,7 +213,7 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
             return `${node.field} ${labels[node.operator] || node.operator}${unary ? '' : ` ${JSON.stringify(node.value)}`}`;
         }
         const children = node.children || [];
-        if (!children.length) return '(always)';
+        if (!children.length) return node.op === 'or' ? '(never)' : '(always)';
         return children.map(child => child.type === 'group' ? `(${summarizeNode(child)})` : summarizeNode(child)).join(node.op === 'or' ? ' OR ' : ' AND ');
     };
 
@@ -166,29 +311,47 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
 
     function buildServer() {
         const server = new McpServer(
-            {name: 'simple-toggle', version: '1.0.0'},
-            {instructions: 'Manage Simple Toggle toggles, values, and condition mappers. Stored descriptions explain intended meaning and should be treated as the source of truth. Search or list controls before guessing a key. You may create, change, flip, delete, inspect history, and revert controls when the user asks.'}
+            {name: 'simple-toggle', version: '1.1.0'},
+            {instructions: MCP_GUIDE}
         );
-        const controlType = z.enum(['toggle', 'value', 'mapper']);
+
+        const controlType = z.enum(['toggle', 'value', 'mapper']).describe('Control category: toggle=boolean switch, value=single editable value, mapper=ordered condition mapper.');
+        const id = z.string().min(1).describe('Control identifier. Toggle: exact key/botName. Value or mapper: permanent token OR key; duplicate keys resolve newest-first.');
         const readOnly = {readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false};
         const mutate = {readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false};
 
+        server.registerTool('get_guide', {
+            title: 'Read the Simple Toggle operating guide',
+            description: 'Returns the complete domain guide for this MCP server: control semantics, identifier rules, mapper JSON grammar/operators, history/revert behavior, tool choice, and authentication behavior. Use this instead of asking the user protocol questions.',
+            inputSchema: z.object({}),
+            annotations: readOnly
+        }, safe(async () => ({guide: MCP_GUIDE})));
+
         server.registerTool('list_controls', {
             title: 'List Simple Toggle controls',
-            description: 'List toggles, values, and condition mappers, including current state/value and descriptions.',
-            inputSchema: z.object({type: controlType.optional()}), annotations: readOnly
+            description: 'Return the current inventory. Each result includes its type plus current state/value/configuration and stored description. Omit type to return toggles, values, and mappers together.',
+            inputSchema: z.object({
+                type: controlType.optional().describe('Optional filter. Omit to list all control types.')
+            }),
+            annotations: readOnly
         }, safe(async ({type}) => ({controls: await listControls(type || null)})));
 
         server.registerTool('search_controls', {
-            title: 'Search controls',
-            description: 'Search keys, titles, descriptions, current values, and mapper definitions. Prefer this when the user refers to a control by meaning instead of exact key.',
-            inputSchema: z.object({query: z.string(), type: controlType.optional(), limit: z.number().int().min(1).max(100).optional()}), annotations: readOnly
+            title: 'Search controls by meaning, name, value, or definition',
+            description: 'Best discovery tool when the user does not provide an exact key. Searches serialized keys, titles, descriptions, current values, bot grouping, mapper examples, and mapper rules. If one result clearly matches the user intent, use it without asking for the exact key.',
+            inputSchema: z.object({
+                query: z.string().describe('Free-text search terms from the user intent, e.g. "coupon", "Japan order", "maintenance", or a known current value.'),
+                type: controlType.optional().describe('Optional type filter when the intended kind is known.'),
+                limit: z.number().int().min(1).max(100).optional().describe('Maximum results. Defaults to 20.')
+            }),
+            annotations: readOnly
         }, safe(async ({query, type, limit}) => ({controls: await searchControls(query, type || null, limit || 20)})));
 
         server.registerTool('get_control', {
-            title: 'Get a control',
-            description: 'Read one control in full. id can be a toggle key, value token/key, or mapper token/key.',
-            inputSchema: z.object({type: controlType, id: z.string().min(1)}), annotations: readOnly
+            title: 'Get one control in full',
+            description: 'Read the complete current snapshot of a known control. For toggles id is the exact key/botName. For values and mappers id can be token or key; key lookup resolves the newest matching control.',
+            inputSchema: z.object({type: controlType, id}),
+            annotations: readOnly
         }, safe(async ({type, id}) => {
             const control = await findControl(type, id);
             if (!control) throw new Error(`${type} control not found: ${id}`);
@@ -196,9 +359,10 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
         }));
 
         server.registerTool('explain_control', {
-            title: 'Explain a control',
-            description: 'Explain intended meaning from the stored description plus current state/value and mapper rules.',
-            inputSchema: z.object({type: controlType, id: z.string().min(1)}), annotations: readOnly
+            title: 'Explain what a control means and its current state',
+            description: 'Human-readable explanation grounded in stored metadata. Toggle explanation includes on/off state; value includes current value/group; mapper includes first-match behavior and every ordered rule. Descriptions are treated as authoritative when present.',
+            inputSchema: z.object({type: controlType, id}),
+            annotations: readOnly
         }, safe(async ({type, id}) => {
             const control = await findControl(type, id);
             if (!control) throw new Error(`${type} control not found: ${id}`);
@@ -206,21 +370,41 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
         }));
 
         server.registerTool('create_control', {
-            title: 'Create a control',
-            description: 'Create a toggle, value, or mapper. Add a useful description so humans and future AIs know what it controls.',
-            inputSchema: z.object({type: controlType, key: z.string().min(1), title: z.string().optional(), description: z.string().optional(), status: z.boolean().optional(), value: z.any().optional(), bot_name: z.string().optional(), example: z.record(z.string(), z.any()).optional(), rules: z.array(z.any()).optional()}), annotations: mutate
+            title: 'Create a toggle, value, or mapper',
+            description: 'Create a new control and record creation in history. Always provide a useful description when the user has supplied enough context; future AIs use descriptions to understand purpose. Toggle uses key/title/description/status. Value uses key/value/description/status/bot_name. Mapper uses key/title/description/example/rules.',
+            inputSchema: z.object({
+                type: controlType,
+                key: z.string().min(1).describe('Human/machine key. For toggle this becomes botName. For value/mapper this is the searchable key; a separate permanent token is generated automatically.'),
+                title: z.string().optional().describe('Display title. Most useful for toggles and mappers. Toggle defaults title to key.'),
+                description: z.string().optional().describe('Plain-language purpose/meaning. Make it specific enough that another AI can decide when and how to change the control without asking the user.'),
+                status: z.boolean().optional().describe('Initial active state. Toggle: on/off. Value: control status metadata. Defaults false.'),
+                value: z.any().optional().describe('Initial value for type=value. Strings stay strings; non-strings are JSON-serialized into text storage.'),
+                bot_name: z.string().optional().describe('Optional grouping label for type=value. Defaults to "none".'),
+                example: z.record(z.string(), z.any()).optional().describe('For type=mapper: representative input object used by the web UI to discover field names/example values. It does not restrict runtime inputs.'),
+                rules: z.array(z.any()).optional().describe('For type=mapper: ordered first-match rules. Each rule: {name?, when:<condition/group>, result:<object>}. See get_guide for exact grammar/operators.')
+            }),
+            annotations: mutate
         }, safe(createControl));
 
         server.registerTool('update_control', {
-            title: 'Update any control',
-            description: 'Change any editable property. Toggle: status/enabled/title/description. Value: key/value/description/status/bot_name. Mapper: key/title/description/example/rules.',
-            inputSchema: z.object({type: controlType, id: z.string().min(1), patch: z.record(z.string(), z.any())}), annotations: mutate
+            title: 'Update any editable control field',
+            description: 'Generic patch operation. Use for metadata edits and mapper definitions. Toggle patch: status or enabled, title, description. Value patch: key, value, description, status, bot_name/botName. Mapper patch: key, title, description, example, rules. Only supplied fields change; omitted fields remain untouched. The before/after state is recorded in history.',
+            inputSchema: z.object({
+                type: controlType,
+                id,
+                patch: z.record(z.string(), z.any()).describe('Partial update object. Use canonical fields described in this tool. Mapper rules replace the full ordered rule list when supplied.')
+            }),
+            annotations: mutate
         }, safe(updateControl));
 
         server.registerTool('flip_toggle', {
-            title: 'Flip or set a toggle',
-            description: 'Turn a toggle on, off, or invert its current state.',
-            inputSchema: z.object({id: z.string().min(1), mode: z.enum(['on', 'off', 'flip']).default('flip')}), annotations: mutate
+            title: 'Turn a toggle on, off, or invert it',
+            description: 'Convenience tool for boolean controls. Use mode=on for "enable/turn on", mode=off for "disable/turn off", and mode=flip only for "toggle/invert/change to opposite". The change is recorded in history.',
+            inputSchema: z.object({
+                id: z.string().min(1).describe('Exact toggle key/botName. If the user gave only a semantic name, resolve it first with search_controls.'),
+                mode: z.enum(['on', 'off', 'flip']).default('flip').describe('Desired operation: on, off, or invert current state.')
+            }),
+            annotations: mutate
         }, safe(async ({id, mode}) => {
             const current = await findControl('toggle', id);
             if (!current) throw new Error(`Toggle not found: ${id}`);
@@ -229,20 +413,30 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
 
         server.registerTool('set_value', {
             title: 'Set a value control',
-            description: 'Set the current value of a value control by permanent token or key.',
-            inputSchema: z.object({id: z.string().min(1), value: z.any()}), annotations: mutate
+            description: 'Convenience tool for ordinary value changes. id accepts permanent token or key; duplicate key lookup chooses newest. The supplied value is stored (non-strings JSON-serialized) and status becomes active/true. The change is recorded in history.',
+            inputSchema: z.object({
+                id: z.string().min(1).describe('Value permanent token or key. If user named it semantically, resolve with search_controls first.'),
+                value: z.any().describe('New value. Strings remain strings; non-strings are JSON-serialized into the existing text-backed value storage.')
+            }),
+            annotations: mutate
         }, safe(async ({id, value}) => updateControl({type: 'value', id, patch: {value, status: true}})));
 
         server.registerTool('delete_control', {
             title: 'Delete a control',
-            description: 'Delete a toggle, value, or mapper. Deletion is recorded and can be restored through history.',
-            inputSchema: z.object({type: controlType, id: z.string().min(1)}), annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false}
+            description: 'Delete a toggle, value, or mapper after identifying it confidently. Values also lose outstanding one-time setter links. The full pre-delete snapshot is retained in rolling history and can later be restored with revert_change.',
+            inputSchema: z.object({type: controlType, id}),
+            annotations: {readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false}
         }, safe(deleteControl));
 
         server.registerTool('evaluate_mapper', {
-            title: 'Evaluate a condition mapper',
-            description: 'Run input JSON through a mapper using first-match priority. Set merge=true to merge the result over the input.',
-            inputSchema: z.object({id: z.string().min(1), input: z.record(z.string(), z.any()), merge: z.boolean().optional()}), annotations: readOnly
+            title: 'Evaluate a condition mapper without modifying it',
+            description: 'Run an input JSON object through an existing mapper. Rules are evaluated in stored order and the first match wins; no match returns {}. merge=false returns only the mapper result. merge=true returns input overlaid with the mapper result. This tool is read-only.',
+            inputSchema: z.object({
+                id: z.string().min(1).describe('Mapper permanent token or key. Duplicate key lookup chooses newest.'),
+                input: z.record(z.string(), z.any()).describe('Runtime JSON object to test against mapper conditions. Dot-path fields are resolved inside this object.'),
+                merge: z.boolean().optional().describe('If true, return {...input, ...matchedResult}; otherwise return only matchedResult. Defaults false.')
+            }),
+            annotations: readOnly
         }, safe(async ({id, input, merge}) => {
             const mapper = await findControl('mapper', id);
             if (!mapper) throw new Error(`Mapper not found: ${id}`);
@@ -251,23 +445,47 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
         }));
 
         server.registerTool('list_history', {
-            title: 'List control history',
-            description: 'List recent changes with timestamp, source, before state, and after state. History rolls per control.',
-            inputSchema: z.object({type: controlType.optional(), id: z.string().optional(), limit: z.number().int().min(1).max(500).optional()}), annotations: readOnly
+            title: 'List recent control changes',
+            description: 'Return rolling audit history with history id, type, stable control id, label, action, source, before snapshot, after snapshot, compact from/to summaries, and timestamp. Filter by type and/or stable id when needed.',
+            inputSchema: z.object({
+                type: controlType.optional().describe('Optional control-type filter.'),
+                id: z.string().optional().describe('Optional stable control id: toggle key/botName, value token, or mapper token.'),
+                limit: z.number().int().min(1).max(500).optional().describe('Maximum rows, newest first. Defaults to the history module default.')
+            }),
+            annotations: readOnly
         }, safe(async args => ({history: await history.list(args)})));
 
         server.registerTool('revert_change', {
-            title: 'Revert a historical change',
-            description: 'Restore the BEFORE snapshot of a history entry. This can restore a deleted widget or undo a creation/update.',
-            inputSchema: z.object({history_id: z.number().int().positive()}), annotations: mutate
+            title: 'Revert one history entry',
+            description: 'Restore the BEFORE snapshot of the selected history entry. Update -> restores old state; delete -> recreates deleted widget; create -> removes created widget. The revert itself is recorded as a new history entry.',
+            inputSchema: z.object({
+                history_id: z.number().int().positive().describe('Numeric id returned by list_history. This targets the exact historical event, not merely a control.')
+            }),
+            annotations: mutate
         }, safe(async ({history_id}) => {
             const reverted = await history.revert(history_id, 'mcp');
             if (!reverted) throw new Error(`History entry not found: ${history_id}`);
             return reverted;
         }));
 
-        server.registerResource('controls', 'simple-toggle://controls', {title: 'Simple Toggle controls', description: 'All current controls and their descriptions.', mimeType: 'application/json'}, async uri => ({contents: [{uri: uri.href, mimeType: 'application/json', text: JSON.stringify(await listControls(), null, 2)}]}));
-        server.registerResource('history', 'simple-toggle://history', {title: 'Simple Toggle recent history', description: 'Recent control changes, including before/after snapshots.', mimeType: 'application/json'}, async uri => ({contents: [{uri: uri.href, mimeType: 'application/json', text: JSON.stringify(await history.list({limit: 100}), null, 2)}]}));
+        server.registerResource('guide', 'simple-toggle://guide', {
+            title: 'Simple Toggle MCP operating guide',
+            description: 'Complete instructions for control types, discovery, ids, mapper grammar/operators, history/revert, tool choice, and authentication.',
+            mimeType: 'text/markdown'
+        }, async uri => ({contents: [{uri: uri.href, mimeType: 'text/markdown', text: MCP_GUIDE}]}));
+
+        server.registerResource('controls', 'simple-toggle://controls', {
+            title: 'Simple Toggle controls',
+            description: 'Full current inventory of toggles, values, and mappers including descriptions and current configuration.',
+            mimeType: 'application/json'
+        }, async uri => ({contents: [{uri: uri.href, mimeType: 'application/json', text: JSON.stringify(await listControls(), null, 2)}]}));
+
+        server.registerResource('history', 'simple-toggle://history', {
+            title: 'Simple Toggle recent history',
+            description: 'Recent control changes with before/after snapshots, source, and timestamps.',
+            mimeType: 'application/json'
+        }, async uri => ({contents: [{uri: uri.href, mimeType: 'application/json', text: JSON.stringify(await history.list({limit: 100}), null, 2)}]}));
+
         return server;
     }
 
@@ -300,5 +518,5 @@ module.exports = ({app, knex, history, mapperApi, generateRandomToken, configure
     app.get('/mcp', methodNotAllowed);
     app.delete('/mcp', methodNotAllowed);
 
-    return {buildServer, listControls, searchControls, findControl};
+    return {buildServer, listControls, searchControls, findControl, guide: MCP_GUIDE};
 };
