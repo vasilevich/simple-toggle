@@ -167,8 +167,9 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
         }
     });
 
-    // Public configuration distribution endpoints. These return definitions only; production row evaluation belongs in clients.
+    // Key lookup uses the normal admin token. Permanent mapper tokens remain usable as credentials by themselves.
     app.get('/m/key/:key', async (req, res) => {
+        if (!verify_request(req, res)) return;
         res.set('Cache-Control', 'public, max-age=0, must-revalidate');
         try {
             await schemaReady;
