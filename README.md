@@ -221,17 +221,17 @@ The browser UI creates this structure with dropdowns and nested expression contr
 
 # Fetching mapper definitions
 
-Mapper definitions are available without the admin token through read-only distribution URLs:
+Mapper-by-key lookup uses the normal Simple Toggle admin token:
 
 ```text
 GET /m/key/<mapper-key>
-GET /m/<permanent-mapper-token>
+Authorization: Bearer <admin-token>
 ```
 
-For example:
+A permanent mapper token can be used directly as its own credential:
 
 ```text
-GET /m/key/kish-orders-coupons
+GET /m/<permanent-mapper-token>
 ```
 
 The response contains:
@@ -266,142 +266,28 @@ There is no Maven/Gradle dependency requirement. Copy the single file into your 
 Basic usage:
 
 ```java
-SimpleToggleMapper simpleToggle =
-    new SimpleToggleMapper("https://toggle.example.com");
+SimpleToggleMapper simpleToggle = new SimpleToggleMapper(
+    "https://toggle.example.com",
+    System.getenv("SIMPLE_TOGGLE_TOKEN")
+);
 
 SimpleToggleMapper.MapperDefinition mapper =
     simpleToggle.getMapper("kish-orders-coupons");
 
 for (Map<String, Object> order : orders) {
-    mapper.apply(order);
+    mapper.apply(order); // entirely local; no HTTP here
 }
 ```
 
-`getMapper(key)` fetches the definition the first time and caches it in memory.
+The second constructor argument is the same token used by the normal Simple Toggle web/admin API. The Java client sends it as a Bearer token only when fetching/revalidating a mapper by key.
 
-`mapper.apply(order)` performs **no HTTP**. It executes conditions/actions/expressions locally.
+`getMapper(key)` fetches the definition the first time and caches it in memory. `refreshMapper(key)` revalidates with the same Bearer token plus `If-None-Match`.
 
-If you want a transformed copy instead of mutating the original:
-
-```java
-Map<String, Object> transformed = mapper.evaluate(order);
-```
-
-When you choose to check for rule changes:
+If you already have the permanent mapper token, the global admin token is optional:
 
 ```java
-mapper = simpleToggle.refreshMapper("kish-orders-coupons");
+SimpleToggleMapper simpleToggle = new SimpleToggleMapper("https://toggle.example.com");
+SimpleToggleMapper.MapperDefinition mapper = simpleToggle.getMapperByToken(mapperToken);
 ```
 
-`refreshMapper` sends `If-None-Match`. If the configuration did not change, Simple Toggle returns `304` and the cached mapper instance is reused.
-
-You decide the refresh policy: once per import, application startup, every few minutes, etc.
-
-See `java/README.md` for the compact Java-specific guide.
-
-# Server-side mapper evaluation
-
-Server-side evaluation still exists as a debugging/convenience feature:
-
-```text
-POST /m/<mapper-token>
-POST /bot/mappers/<mapper-token>/test
-```
-
-It is **not required** for normal production processing.
-
-The intended production path is local evaluation in Java/Node/Python/etc.
-
-# Values
-
-Values are editable remote single-value controls.
-
-Permanent value API:
-
-```text
-GET  /v/<permanent-value-token>
-POST /v/<permanent-value-token>
-```
-
-Node client example:
-
-```js
-const BotControl = require('bots-status-manager');
-
-BotControl.configure({
-  url: 'https://toggle.example.com',
-  token: process.env.SIMPLE_TOGGLE_TOKEN
-});
-
-const value = await BotControl.getValueByKey('feature_message', 'default');
-await BotControl.setValueByKey('feature_message', 'hello');
-```
-
-# Toggles
-
-```js
-const worker = new BotControl('worker-name');
-
-await worker.enable();
-await worker.disable();
-const status = await worker.getStatus();
-```
-
-# Change history
-
-Changes made through the web UI, APIs, permanent/temporary value links, mapper editing, and MCP are recorded as before/after snapshots.
-
-History defaults to the newest 100 entries per control (`historyLimit`).
-
-The History tab shows:
-
-- timestamp
-- source
-- before/after state
-- compact from → to summary
-- revert button
-
-Reverting a deletion restores the deleted widget. Reverting a creation removes it again. Reverts themselves are also recorded.
-
-# MCP
-
-Simple Toggle exposes an intentionally unauthenticated Streamable HTTP MCP endpoint:
-
-```text
-https://toggle.example.com/mcp
-```
-
-No bearer token, API key, OAuth, or custom authorization header is required for MCP.
-
-Anyone who can reach `/mcp` can inspect and mutate Simple Toggle, so network access to this endpoint is the security boundary.
-
-The MCP server exposes tools for:
-
-- listing/searching/explaining controls
-- creating/updating/deleting controls
-- flipping toggles
-- setting values
-- reading/editing mapper definitions
-- test-evaluating mappers
-- history and revert
-
-Mapper definitions exposed through MCP use the same v2 rules/actions/expression format described above. MCP/server evaluation is useful for tests; production bulk row processing should still fetch the definition and execute it locally.
-
-# Configuration
-
-`config/default.json` contains the normal server configuration:
-
-```json
-{
-  "url": "http://localhost",
-  "port": 3000,
-  "hostname": "127.0.0.1",
-  "unixPath": "",
-  "token": "1234567890",
-  "historyLimit": 100
-}
-```
-
-`token` protects the normal admin/web APIs.
-
-`/mcp` is intentionally unauthenticated.
+That permanent mapper token is the credential for `/m/<mapper-token>`.
