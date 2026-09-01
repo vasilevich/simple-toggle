@@ -51,18 +51,65 @@ export interface MapperGroup {
     children: Array<MapperGroup | MapperCondition>;
 }
 
+export interface MapperConstExpression {
+    type: 'const';
+    value: any;
+}
+
+export interface MapperFieldExpression {
+    type: 'field';
+    path: string;
+}
+
+export type MapperExpressionOperator = 'add' | 'subtract' | 'multiply' | 'divide' | 'concat' | 'coalesce';
+
+export interface MapperOperationExpression {
+    type: 'op';
+    op: MapperExpressionOperator;
+    args: MapperExpression[];
+}
+
+export interface MapperConditionalExpression {
+    type: 'conditional';
+    when: MapperGroup | MapperCondition;
+    then: MapperExpression;
+    else: MapperExpression;
+}
+
+export type MapperExpression = MapperConstExpression | MapperFieldExpression | MapperOperationExpression | MapperConditionalExpression;
+
+export interface MapperSetAction {
+    type: 'set';
+    field: string;
+    value: MapperExpression;
+}
+
+export interface MapperUnsetAction {
+    type: 'unset';
+    field: string;
+}
+
+export type MapperAction = MapperSetAction | MapperUnsetAction;
+
 export interface MapperRule {
     name?: string;
     when: MapperGroup | MapperCondition;
-    result: Record<string, any>;
+    actions: MapperAction[];
+    afterMatch?: 'continue' | 'stop';
+    /** Legacy v1 representation; accepted and normalized into constant set actions. */
+    result?: Record<string, any>;
 }
 
 export interface ConditionMapper {
+    definitionVersion?: number;
+    revision?: string;
     key: string;
     title?: string;
     description?: string;
     token: string;
     accessToken?: string;
+    definitionUrl?: string;
+    definitionKeyUrl?: string;
     runtimeUrl?: string;
     example: Record<string, any>;
     rules: MapperRule[];
@@ -114,6 +161,7 @@ export default class BotControl {
     static updateMapper(mapperToken: string, config: Partial<MapperConfig>): Promise<ApiResult>;
     static deleteMapper(mapperToken: string): Promise<ApiResult>;
     static getMapperUrl(mapperToken: string, options?: MapperOptions): string;
+    /** Server-side mapper execution is a debugging convenience; production bulk processing should evaluate downloaded definitions locally. */
     static mapRequest(mapperToken: string, input: Record<string, any>, options?: MapperOptions): Promise<ApiResult>;
     static map(mapperToken: string, input: Record<string, any>, options?: MapperOptions): Promise<any>;
     static applyMap(mapperToken: string, input: Record<string, any>): Promise<Record<string, any>>;
