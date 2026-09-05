@@ -81,6 +81,7 @@ const normalizeRules = rules => {
         if (!['continue', 'stop'].includes(afterMatch)) throw new TypeError(`Rule ${index + 1} afterMatch must be "continue" or "stop".`);
         return {
             name: String(rule.name ?? ''),
+            enabled: rule.enabled !== false,
             when: normalizeCondition(rule.when ?? rule.conditions ?? {type: 'group', op: 'and', children: []}),
             actions,
             afterMatch
@@ -240,7 +241,7 @@ const evaluateRules = (rules, input) => {
     const unsetFields = [];
     const matchedRules = [];
     normalized.forEach((rule, index) => {
-        if (matchedRules.stopped) return;
+        if (matchedRules.stopped || rule.enabled === false) return;
         if (!evaluateConditionNode(rule.when, working)) return;
         matchedRules.push({index, name: rule.name, afterMatch: rule.afterMatch});
         executeActions(rule.actions, working, changes, unsetFields);
