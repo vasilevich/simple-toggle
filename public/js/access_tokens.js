@@ -132,9 +132,11 @@
     function setRuleButtonState(button, row, enabled) {
         button.classList.toggle('enabled', enabled);
         button.classList.toggle('disabled', !enabled);
-        button.textContent = enabled ? '✓' : '×';
-        button.title = enabled ? 'Rule enabled — click to disable' : 'Rule disabled — click to enable';
-        button.setAttribute('aria-label', button.title);
+        const text = enabled ? '✓' : '×';
+        const title = enabled ? 'Rule enabled — click to disable' : 'Rule disabled — click to enable';
+        if (button.textContent !== text) button.textContent = text;
+        if (button.title !== title) button.title = title;
+        if (button.getAttribute('aria-label') !== title) button.setAttribute('aria-label', title);
         row.classList.toggle('mapper-rule-disabled', !enabled);
     }
 
@@ -208,8 +210,10 @@
         }
     }).observe(editor, {attributes: true, attributeFilter: ['hidden']});
 
+    // Only observe direct rule-row replacement. Watching the whole subtree caused the decorator
+    // to observe its own ✓/× button updates and spin when the mapper editor opened.
     const rulesBody = document.getElementById('mapper-rules-body');
-    if (rulesBody) new MutationObserver(() => decorateRuleButtons()).observe(rulesBody, {childList: true, subtree: true});
+    if (rulesBody) new MutationObserver(() => decorateRuleButtons()).observe(rulesBody, {childList: true});
 
     document.getElementById('mapper-key-input')?.addEventListener('input', () => {
         decorateMapperEditor();
