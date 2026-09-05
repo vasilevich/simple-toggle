@@ -30,6 +30,38 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
         return value;
     };
 
+    const normalizeStoredRules = value => engine.normalizeRules(parseJson(value, []));
+
+    const clientRules = value => normalizeStoredRules(value)
+        .filter(rule => rule.enabled !== false)
+        .map(rule => {
+            const {enabled, ...clientRule} = rule;
+            return clientRule;
+        });
+
+    const ruleSignature = rule => {
+        const normalized = engine.normalizeRules([rule])[0];
+        const {enabled, ...withoutEnabled} = normalized;
+        return JSON.stringify(withoutEnabled);
+    };
+
+    const mergeEnabledState = (incomingRules, existingRules) => {
+        const incoming = engine.normalizeRules(incomingRules);
+        const existing = engine.normalizeRules(existingRules || []);
+        if (!existing.length) return incoming;
+
+        const used = new Set();
+        const sameLength = incoming.length === existing.length;
+        return incoming.map((rule, index) => {
+            const signature = ruleSignature(rule);
+            let existingIndex = existing.findIndex((candidate, candidateIndex) => !used.has(candidateIndex) && ruleSignature(candidate) === signature);
+            if (existingIndex < 0 && sameLength && existing[index]) existingIndex = index;
+            if (existingIndex < 0) return {...rule, enabled: true};
+            used.add(existingIndex);
+            return {...rule, enabled: existing[existingIndex].enabled !== false};
+        });
+    };
+
     const revisionFor = row => `${new Date(row.updated_at || row.created_at || 0).getTime()}-${String(row.token || '').slice(0, 8)}`;
     const etagFor = row => `"mapper-${revisionFor(row)}"`;
 
@@ -57,12 +89,29 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
         definitionKeyUrl: `${getBaseUrl(req)}/m/key/${encodeURIComponent(row.key)}`,
         runtimeUrl: `${getBaseUrl(req)}/m/${encodeURIComponent(row.token)}`,
         example: normalizeExample(parseJson(row.example_json, {})),
-        rules: engine.normalizeRules(parseJson(row.rules_json, [])),
+        rules: normalizeStoredRules(row.rules_json),
         updatedAt: row.updated_at,
         createdAt: row.created_at
     });
 
-    const mapperUpdate = body => {
+    const serializeClientRow = (req, row) => ({
+        definitionVersion: 2,
+        revision: revisionFor(row),
+        key: row.key,
+        title: row.title || '',
+        description: row.description || '',
+        token: row.token,
+        accessToken: row.token,
+        definitionUrl: `${getBaseUrl(req)}/m/${encodeURIComponent(row.token)}`,
+        definitionKeyUrl: `${getBaseUrl(req)}/m/key/${encodeURIComponent(row.key)}`,
+        runtimeUrl: `${getBaseUrl(req)}/m/${encodeURIComponent(row.token)}`,
+        example: normalizeExample(parseJson(row.example_json, {})),
+        rules: clientRules(row.rules_json),
+        updatedAt: row.updated_at,
+        createdAt: row.created_at
+    });
+
+    const mapperUpdate = (body, existingRules = null) => {
         const update = {updated_at: new Date()};
         if (body.key !== undefined) {
             const key = String(body.key).trim();
@@ -72,14 +121,17 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
         if (body.title !== undefined) update.title = String(body.title ?? '');
         if (body.description !== undefined) update.description = String(body.description ?? '');
         if (body.example !== undefined || body.example_json !== undefined) update.example_json = JSON.stringify(normalizeExample(body.example ?? body.example_json));
-        if (body.rules !== undefined || body.rules_json !== undefined) update.rules_json = JSON.stringify(engine.normalizeRules(parseJson(body.rules ?? body.rules_json, [])));
+        if (body.rules !== undefined || body.rules_json !== undefined) {
+            const incoming = parseJson(body.rules ?? body.rules_json, []);
+            update.rules_json = JSON.stringify(existingRules == null ? engine.normalizeRules(incoming) : mergeEnabledState(incoming, existingRules));
+        }
         return update;
     };
 
     const sendDefinition = async (req, res, row) => {
         if (!row) return res.status(404).json({error: 'Condition mapper not found.'});
         if (!setDefinitionHeaders(req, res, row)) return;
-        res.json(serializeRow(req, row));
+        res.json(serializeClientRow(req, row));
     };
 
     app.get('/bot/mappers', async (req, res) => {
@@ -124,7 +176,9 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
         if (!verify_request(req, res)) return;
         try {
             await schemaReady;
-            await sendDefinition(req, res, await knex(TABLE).where('token', req.params.token).first());
+            const row = await knex(TABLE).where('token', req.params.token).first();
+            if (!row) return res.status(404).json({error: 'Condition mapper not found.'});
+            res.json(serializeRow(req, row));
         } catch (err) {
             console.error(err);
             res.status(500).json({error: 'Unable to retrieve condition mapper.'});
@@ -137,7 +191,7 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
             await schemaReady;
             const existing = await knex(TABLE).where('token', req.params.token).first();
             if (!existing) return res.status(404).json({error: 'Condition mapper not found.'});
-            const update = mapperUpdate(req.body || {});
+            const update = mapperUpdate(req.body || {}, normalizeStoredRules(existing.rules_json));
             await knex(TABLE).where('token', req.params.token).update(update);
             const row = {...existing, ...update};
             if (history) await history.record('mapper', req.params.token, 'update', existing, row, 'api');
@@ -149,6 +203,31 @@ module.exports = ({app, knex, verify_request, generateRandomToken, getBaseUrl, h
     };
     app.post('/bot/mappers/:token', updateHandler);
     app.put('/bot/mappers/:token', updateHandler);
+
+    app.post('/bot/mappers/:token/rules/:index/enabled', async (req, res) => {
+        if (!verify_request(req, res)) return;
+        try {
+            await schemaReady;
+            if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({error: 'enabled must be boolean.'});
+            const index = Number(req.params.index);
+            if (!Number.isInteger(index) || index < 0) return res.status(400).json({error: 'Invalid rule index.'});
+
+            const existing = await knex(TABLE).where('token', req.params.token).first();
+            if (!existing) return res.status(404).json({error: 'Condition mapper not found.'});
+            const rules = normalizeStoredRules(existing.rules_json);
+            if (!rules[index]) return res.status(404).json({error: 'Rule not found.'});
+
+            rules[index].enabled = req.body.enabled;
+            const update = {rules_json: JSON.stringify(rules), updated_at: new Date()};
+            await knex(TABLE).where('token', req.params.token).update(update);
+            const row = {...existing, ...update};
+            if (history) await history.record('mapper', req.params.token, 'update', existing, row, 'web');
+            res.json(serializeRow(req, row));
+        } catch (err) {
+            console.error(err);
+            res.status(err instanceof TypeError ? 400 : 500).json({error: err.message || 'Unable to update rule status.'});
+        }
+    });
 
     app.delete('/bot/mappers/:token', async (req, res) => {
         if (!verify_request(req, res)) return;
