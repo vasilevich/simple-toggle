@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Dependency-free Java 8 client + local evaluator for Simple Toggle condition mappers.
+ * Dependency-free Java 8 client for values, toggles, and local/remote condition mappers.
  *
  * Typical usage:
  *
@@ -52,11 +52,12 @@ public class SimpleToggleMapper {
     /** Creates a client that can fetch mapper definitions by key using the normal admin Bearer token. */
     public SimpleToggleMapper(String baseUrl, String apiToken) {
         if (baseUrl == null || baseUrl.trim().isEmpty()) throw new IllegalArgumentException("baseUrl is required");
-        this.baseUrl = baseUrl.replaceAll("/+$", "");
+        this.baseUrl = baseUrl.trim().replaceAll("/+$", "");
         this.apiToken = apiToken == null ? null : apiToken.trim();
     }
 
     public SimpleToggleMapper setTimeouts(int connectTimeoutMs, int readTimeoutMs) {
+        if (connectTimeoutMs < 0 || readTimeoutMs < 0) throw new IllegalArgumentException("Timeouts must not be negative");
         this.connectTimeoutMs = connectTimeoutMs;
         this.readTimeoutMs = readTimeoutMs;
         return this;
@@ -96,43 +97,255 @@ public class SimpleToggleMapper {
     public synchronized void invalidate(String key) { cache.remove(key); }
     public synchronized void clearCache() { cache.clear(); }
 
+    public static final int DEFAULT_TEMP_LINK_MINUTES = 7 * 24 * 60;
+
+    // Direct values and administrative operations use the same endpoints as the JS client.
+    public List<Map<String, Object>> getValues() throws IOException { return listRequest("/bot/values"); }
+    public Map<String, Object> getValuesMap() throws IOException {
+        List<Map<String, Object>> values = getValues();
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (int i = values.size() - 1; i >= 0; i--) {
+            Map<String, Object> item = values.get(i);
+            if (item.get("key") != null) result.put(string(item.get("key")), item.get("value"));
+        }
+        return result;
+    }
+    public List<Map<String, Object>> getValuesByBot(String botName) throws IOException {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        for (Map<String, Object> item : getValues()) if (belongsToBot(item, botName)) result.add(item);
+        return result;
+    }
+    public Map<String, Object> findValue(String key) throws IOException { return findValue(key, null); }
+    public Map<String, Object> findValue(String key, String botName) throws IOException {
+        for (Map<String, Object> item : getValues())
+            if (java.util.Objects.equals(key, item.get("key")) && (botName == null || belongsToBot(item, botName))) return item;
+        return null;
+    }
+    public Object getValueByKey(String key) throws IOException { return getValueByKey(key, null, null); }
+    public Object getValueByKey(String key, Object defaultValue) throws IOException { return getValueByKey(key, defaultValue, null); }
+    public Object getValueByKey(String key, Object defaultValue, String botName) throws IOException {
+        Map<String, Object> item = findValue(key, botName);
+        return item == null || item.get("value") == null ? defaultValue : item.get("value");
+    }
+    public Map<String, Object> setValueByKey(String key, Object value) throws IOException { return setValueByKey(key, value, null); }
+    public Map<String, Object> setValueByKey(String key, Object value, String botName) throws IOException {
+        Map<String, Object> item = findValue(key, botName);
+        return item == null ? valueNotFound() : setValue(string(item.get("token")), value);
+    }
+    public Map<String, Object> getValue(String token) throws IOException { return request("/v/" + encode(token), "GET", null, false, null).result(); }
+    public Map<String, Object> setValue(String token, Object value) throws IOException { return request("/v/" + encode(token), "POST", object("value", value), false, null).result(); }
+    public Map<String, Object> deleteValue(String token) throws IOException { return deleteRequest("/bot/delete_value/" + encode(token)); }
+    public Object getValueOnlyValue(String token) { return getValueOnlyValue(token, null); }
+    public Object getValueOnlyValue(String token, Object defaultValue) {
+        try { Object value = getValue(token).get("value"); return value == null ? defaultValue : value; }
+        catch (IOException ex) { return defaultValue; }
+    }
+    public Object getValueOnlyValueNoEmptyOrNull(String token) { return getValueOnlyValueNoEmptyOrNull(token, null); }
+    public Object getValueOnlyValueNoEmptyOrNull(String token, Object defaultValue) {
+        Object value = getValueOnlyValue(token, defaultValue);
+        return value instanceof String && !((String) value).trim().isEmpty() ? value : defaultValue;
+    }
+    public String getPermanentValueUrl(String token) throws IOException { return getPermanentValueUrl(token, false); }
+    public String getPermanentValueUrl(String token, boolean onlyValue) throws IOException { return buildUrl("/v/" + encode(token) + (onlyValue ? "?only_value=true" : "")); }
+    public Map<String, Object> createTemporarySetUrl(String token) throws IOException { return createTemporarySetUrl(token, DEFAULT_TEMP_LINK_MINUTES); }
+    public Map<String, Object> createTemporarySetUrl(String token, int expiresInMinutes) throws IOException { return postRequest("/bot/temp_link/" + encode(token), object("expires_in_minutes", expiresInMinutes)); }
+    public Map<String, Object> createTemporarySetUrlByKey(String key) throws IOException { return createTemporarySetUrlByKey(key, null, DEFAULT_TEMP_LINK_MINUTES); }
+    public Map<String, Object> createTemporarySetUrlByKey(String key, String botName) throws IOException { return createTemporarySetUrlByKey(key, botName, DEFAULT_TEMP_LINK_MINUTES); }
+    public Map<String, Object> createTemporarySetUrlByKey(String key, String botName, int expiresInMinutes) throws IOException {
+        Map<String, Object> item = findValue(key, botName);
+        return item == null ? valueNotFound() : createTemporarySetUrl(string(item.get("token")), expiresInMinutes);
+    }
+
+    public List<Map<String, Object>> getMappers() throws IOException { return listRequest("/bot/mappers"); }
+    public Map<String, Object> findMapper(String key) throws IOException {
+        for (Map<String, Object> mapper : getMappers()) if (java.util.Objects.equals(key, mapper.get("key"))) return mapper;
+        return null;
+    }
+    public Map<String, Object> createMapper(Map<String, Object> config) throws IOException { return postRequest("/bot/mappers", config); }
+    public Map<String, Object> updateMapper(String token, Map<String, Object> config) throws IOException { return postRequest("/bot/mappers/" + encode(token), config); }
+    public Map<String, Object> deleteMapper(String token) throws IOException { return deleteRequest("/bot/mappers/" + encode(token)); }
+    public String getMapperUrl(String token) throws IOException { return getMapperUrl(token, false, false); }
+    public String getMapperUrl(String token, boolean merge) throws IOException { return getMapperUrl(token, merge, false); }
+    public String getMapperUrl(String token, boolean merge, boolean meta) throws IOException {
+        return buildUrl("/m/" + encode(token) + (merge ? "?merge=true" : "") + (meta ? (merge ? "&" : "?") + "meta=true" : ""));
+    }
+    public Map<String, Object> mapRequest(String token, Map<String, Object> input) throws IOException { return mapRequest(token, input, false, false); }
+    public Map<String, Object> mapRequest(String token, Map<String, Object> input, boolean merge) throws IOException { return mapRequest(token, input, merge, false); }
+    public Map<String, Object> mapRequest(String token, Map<String, Object> input, boolean merge, boolean meta) throws IOException {
+        return request(getMapperUrl(token, merge, meta), "POST", input == null ? object() : input, false, null).result();
+    }
+    public Map<String, Object> map(String token, Map<String, Object> input) throws IOException { return map(token, input, false, false); }
+    public Map<String, Object> map(String token, Map<String, Object> input, boolean merge) throws IOException { return map(token, input, merge, false); }
+    public Map<String, Object> map(String token, Map<String, Object> input, boolean merge, boolean meta) throws IOException {
+        return requireObject(request(getMapperUrl(token, merge, meta), "POST", input == null ? object() : input, false, null).requireSuccess());
+    }
+    public Map<String, Object> applyMap(String token, Map<String, Object> input) throws IOException { return map(token, input, true, false); }
+    public Map<String, Object> mapByKey(String key, Map<String, Object> input) throws IOException { return mapByKey(key, input, false, false); }
+    public Map<String, Object> mapByKey(String key, Map<String, Object> input, boolean merge) throws IOException { return mapByKey(key, input, merge, false); }
+    public Map<String, Object> mapByKey(String key, Map<String, Object> input, boolean merge, boolean meta) throws IOException {
+        Map<String, Object> mapper = findMapper(key);
+        if (mapper == null) throw new ApiException(404, object("error", "Condition mapper not found."));
+        return map(string(mapper.get("token")), input, merge, meta);
+    }
+    public Map<String, Object> applyMapByKey(String key, Map<String, Object> input) throws IOException { return mapByKey(key, input, true, false); }
+    public List<Map<String, Object>> getBots() throws IOException { return listRequest("/bots"); }
+
+    /** A bot-scoped handle, equivalent to new BotControl(botName) in JavaScript. */
+    public Bot bot(String botName) { return new Bot(botName); }
+    public final class Bot {
+        private final String name;
+        private Bot(String name) {
+            if (name == null || name.trim().isEmpty()) throw new IllegalArgumentException("botName is required");
+            this.name = name;
+        }
+        public Map<String, Object> getStatus() throws IOException { return getRequest("/bot/" + encode(name)); }
+        public Map<String, Object> setStatus(boolean status) throws IOException { return setStatus(status, null); }
+        public Map<String, Object> setStatus(boolean status, Map<String, Object> extra) throws IOException {
+            Map<String, Object> body = extra == null ? object() : new LinkedHashMap<String, Object>(extra);
+            body.put("status", status);
+            return postRequest("/bot/" + encode(name), body);
+        }
+        public Map<String, Object> enable() throws IOException { return setStatus(true); }
+        public Map<String, Object> disable() throws IOException { return setStatus(false); }
+        public Map<String, Object> remove() throws IOException { return deleteRequest("/bot/" + encode(name)); }
+        public Map<String, Object> generateUrl(String key) throws IOException { return generateUrl(key, "", ""); }
+        public Map<String, Object> generateUrl(String key, String description) throws IOException { return generateUrl(key, description, ""); }
+        public Map<String, Object> generateUrl(String key, String description, Object value) throws IOException {
+            Map<String, Object> result = postRequest("/bot/generate_link", object("bot_name", name, "key", key, "description", description, "value", value));
+            if (!Boolean.TRUE.equals(result.get("ok"))) return result;
+            Object url = result.get("url");
+            URL base = new URL((url == null || string(url).isEmpty() ? baseUrl : string(url)).replaceAll("/+$", "") + "/");
+            result.put("permanent_access_token", result.get("access_token") == null ? result.get("token") : result.get("access_token"));
+            result.put("set_value_url", resolve(base, result.get("set_value_path")));
+            result.put("get_value_url", resolve(base, result.get("get_value_path")));
+            result.put("user_url", resolve(base, result.get("user_path")));
+            return result;
+        }
+        public Map<String, Object> generateTemporaryUrl(String key) throws IOException { return generateTemporaryUrl(key, "", "", DEFAULT_TEMP_LINK_MINUTES); }
+        public Map<String, Object> generateTemporaryUrl(String key, String description) throws IOException { return generateTemporaryUrl(key, description, ""); }
+        public Map<String, Object> generateTemporaryUrl(String key, String description, Object value) throws IOException { return generateTemporaryUrl(key, description, value, DEFAULT_TEMP_LINK_MINUTES); }
+        public Map<String, Object> generateTemporaryUrl(String key, String description, Object value, int expiresInMinutes) throws IOException {
+            Map<String, Object> generated = generateUrl(key, description, value);
+            if (!Boolean.TRUE.equals(generated.get("ok")) || generated.get("token") == null) return generated;
+            Map<String, Object> temporary = createTemporarySetUrl(string(generated.get("token")), expiresInMinutes);
+            generated.putAll(object("temporary_url", temporary.get("url"), "temporary_code", temporary.get("code"),
+                "temporary_expires_at", temporary.get("expires_at"), "temporary_http_code", temporary.get("http_code"), "temporary_ok", temporary.get("ok")));
+            return generated;
+        }
+        public Map<String, Object> generateTempUrl(String key) throws IOException { return generateTemporaryUrl(key); }
+        public Map<String, Object> generateTempUrl(String key, String description) throws IOException { return generateTemporaryUrl(key, description); }
+        public Map<String, Object> generateTempUrl(String key, String description, Object value) throws IOException { return generateTemporaryUrl(key, description, value); }
+        public Map<String, Object> generateTempUrl(String key, String description, Object value, int expiresInMinutes) throws IOException { return generateTemporaryUrl(key, description, value, expiresInMinutes); }
+    }
+
+    public String buildUrl(String path) { return path.startsWith("http://") || path.startsWith("https://") ? path : baseUrl + "/" + path.replaceAll("^/+", ""); }
+    public Map<String, Object> getRequest(String path) throws IOException { return request(path, "GET", null, true, null).result(); }
+    public Map<String, Object> postRequest(String path, Object body) throws IOException { return request(path, "POST", body == null ? object() : body, true, null).result(); }
+    public Map<String, Object> deleteRequest(String path) throws IOException { return request(path, "DELETE", null, true, null).result(); }
+
+    private static boolean belongsToBot(Map<String, Object> item, String name) { return java.util.Objects.equals(name, item.get("botName")) || java.util.Objects.equals(name, item.get("bot_name")); }
+    private static String encode(String value) throws IOException {
+        if (value == null) throw new IllegalArgumentException("path value is required");
+        return URLEncoder.encode(value, "UTF-8").replace("+", "%20");
+    }
+    private static String resolve(URL base, Object path) throws IOException { return path == null || string(path).isEmpty() ? null : new URL(base, string(path)).toString(); }
+    private static Map<String, Object> object(Object... entries) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        for (int i = 0; i < entries.length; i += 2) result.put((String) entries[i], entries[i + 1]);
+        return result;
+    }
+    private static Map<String, Object> valueNotFound() { return object("error", "Value control not found.", "http_code", 404, "ok", false); }
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> requireObject(Object value) throws IOException {
+        if (!(value instanceof Map)) throw new IOException("Response was not a JSON object");
+        return (Map<String, Object>) value;
+    }
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> listRequest(String path) throws IOException {
+        Object data = request(path, "GET", null, true, null).requireSuccess();
+        return data instanceof List ? (List<Map<String, Object>>) data : new ArrayList<Map<String, Object>>();
+    }
+
+    public static final class ApiException extends IOException {
+        private static final long serialVersionUID = 1L;
+        public final int httpCode;
+        public final transient Object data;
+        ApiException(int status, Object data) {
+            super("Simple Toggle request failed (" + status + "): " + data);
+            this.httpCode = status;
+            this.data = data;
+        }
+    }
+    private static final class HttpResponse {
+        final int status;
+        final Object data;
+        final String etag;
+        HttpResponse(int status, Object data, String etag) { this.status = status; this.data = data; this.etag = etag; }
+        boolean ok() { return status >= 200 && status < 300; }
+        Object requireSuccess() throws IOException { if (!ok()) throw new ApiException(status, data); return data; }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> result() {
+            Map<String, Object> result = data instanceof Map ? new LinkedHashMap<String, Object>((Map<String, Object>) data) : object("data", data);
+            result.put("http_code", status);
+            result.put("ok", ok());
+            return result;
+        }
+    }
+    private HttpResponse request(String path, String method, Object payload, boolean useAdminToken, String etag) throws IOException {
+        if (useAdminToken && !hasAdminToken()) throw new IllegalStateException("Simple Toggle admin token is required for this operation.");
+        HttpURLConnection connection = (HttpURLConnection) new URL(buildUrl(path)).openConnection();
+        try {
+            connection.setRequestMethod(method);
+            connection.setConnectTimeout(connectTimeoutMs);
+            connection.setReadTimeout(readTimeoutMs);
+            connection.setRequestProperty("Accept", "application/json");
+            connection.setRequestProperty("User-Agent", "simple-toggle-java8/1.3");
+            if (useAdminToken) connection.setRequestProperty("Authorization", "Bearer " + apiToken);
+            if (etag != null) connection.setRequestProperty("If-None-Match", etag);
+            if (payload != null) {
+                byte[] bytes = Json.stringify(payload).getBytes(StandardCharsets.UTF_8);
+                connection.setRequestProperty("Content-Type", "application/json");
+                connection.setDoOutput(true);
+                connection.setFixedLengthStreamingMode(bytes.length);
+                try (java.io.OutputStream out = connection.getOutputStream()) { out.write(bytes); }
+            }
+            int status = connection.getResponseCode();
+            String responseEtag = connection.getHeaderField("ETag");
+            if (status == HttpURLConnection.HTTP_NOT_MODIFIED) return new HttpResponse(status, null, responseEtag);
+            String body = readUtf8(status >= 200 && status < 300 ? connection.getInputStream() : connection.getErrorStream());
+            Object data = null;
+            if (!body.isEmpty()) {
+                try { data = Json.parse(body); } catch (IOException invalidJson) { data = body; }
+            }
+            return new HttpResponse(status, data, responseEtag);
+        } finally { connection.disconnect(); }
+    }
+
     private MapperDefinition fetch(String url, MapperDefinition cached, boolean useAdminToken) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
-        connection.setRequestMethod("GET");
-        connection.setConnectTimeout(connectTimeoutMs);
-        connection.setReadTimeout(readTimeoutMs);
-        connection.setRequestProperty("Accept", "application/json");
-        connection.setRequestProperty("User-Agent", "simple-toggle-java8/1.1");
-        if (useAdminToken) connection.setRequestProperty("Authorization", "Bearer " + apiToken);
-        if (cached != null && cached.etag != null) connection.setRequestProperty("If-None-Match", cached.etag);
-
-        int status = connection.getResponseCode();
-        if (status == HttpURLConnection.HTTP_NOT_MODIFIED) return null;
-        InputStream stream = status >= 200 && status < 300 ? connection.getInputStream() : connection.getErrorStream();
-        String body = readUtf8(stream);
-        if (status < 200 || status >= 300) throw new IOException("Simple Toggle mapper request failed (" + status + "): " + body);
-
-        Object parsed = Json.parse(body);
-        if (!(parsed instanceof Map)) throw new IOException("Mapper response was not a JSON object");
-        @SuppressWarnings("unchecked") Map<String, Object> definition = (Map<String, Object>) parsed;
-        return new MapperDefinition(definition, connection.getHeaderField("ETag"));
+        HttpResponse response = request(url, "GET", null, useAdminToken, cached == null ? null : cached.etag);
+        if (response.status == HttpURLConnection.HTTP_NOT_MODIFIED && cached != null) return cached;
+        return new MapperDefinition(requireObject(response.requireSuccess()), response.etag);
     }
 
     private static String readUtf8(InputStream input) throws IOException {
         if (input == null) return "";
-        BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8));
-        StringBuilder out = new StringBuilder();
-        String line;
-        while ((line = reader.readLine()) != null) out.append(line).append('\n');
-        return out.toString();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))) {
+            StringBuilder out = new StringBuilder();
+            char[] buffer = new char[4096];
+            int count;
+            while ((count = reader.read(buffer)) != -1) out.append(buffer, 0, count);
+            return out.toString();
+        }
     }
 
     public static final class MapperDefinition {
         private final Map<String, Object> definition;
         private final String etag;
 
-        MapperDefinition(Map<String, Object> definition, String etag) {
-            this.definition = definition;
+        @SuppressWarnings("unchecked")
+        public MapperDefinition(Map<String, Object> definition, String etag) {
+            if (definition == null) throw new IllegalArgumentException("definition is required");
+            this.definition = (Map<String, Object>) deepCopy(definition);
             this.etag = etag;
         }
 
@@ -192,11 +405,12 @@ public class SimpleToggleMapper {
             for (int i = 0; i < rules.size(); i++) {
                 if (!(rules.get(i) instanceof Map)) continue;
                 Map<String, Object> rule = (Map<String, Object>) rules.get(i);
-                Object when = rule.get("when");
+                if (Boolean.FALSE.equals(rule.get("enabled"))) continue;
+                Object when = rule.containsKey("when") ? rule.get("when") : rule.get("conditions");
                 if (!condition(when, working)) continue;
 
                 String name = string(rule.get("name"));
-                String afterMatch = string(rule.get("afterMatch"));
+                String afterMatch = string(rule.containsKey("afterMatch") ? rule.get("afterMatch") : rule.get("after_match"));
                 if (afterMatch.isEmpty()) afterMatch = booleanValue(rule.get("continue")) ? "continue" : "stop";
                 matched.add(new MatchedRule(i, name, afterMatch));
 
@@ -204,7 +418,7 @@ public class SimpleToggleMapper {
                 if (actionsObject instanceof List) {
                     for (Object action : (List<Object>) actionsObject) if (action instanceof Map) applyAction((Map<String, Object>) action, working, changes, unsetFields);
                 } else {
-                    Object resultObject = rule.get("result");
+                    Object resultObject = rule.containsKey("result") ? rule.get("result") : rule.get("output");
                     if (resultObject instanceof Map) {
                         for (Map.Entry<String, Object> entry : ((Map<String, Object>) resultObject).entrySet()) {
                             Object copied = deepCopy(entry.getValue());
@@ -313,6 +527,13 @@ public class SimpleToggleMapper {
     private static boolean condition(Object nodeObject, Map<String, Object> input) {
         if (!(nodeObject instanceof Map)) return true;
         Map<String, Object> node = (Map<String, Object>) nodeObject;
+        if (node.get("and") instanceof List || node.get("or") instanceof List) {
+            boolean or = !(node.get("and") instanceof List);
+            for (Object child : (List<Object>) node.get(or ? "or" : "and")) {
+                if (condition(child, input) == or) return or;
+            }
+            return !or;
+        }
         String type = string(node.get("type"));
         if ("group".equals(type) || node.get("children") instanceof List) {
             String op = string(node.get("op"));
@@ -327,6 +548,7 @@ public class SimpleToggleMapper {
 
         String field = string(node.get("field"));
         String operator = string(node.get("operator"));
+        if (operator.isEmpty()) operator = "eq";
         Object actual = getPath(input, field);
         Object expected = node.get("value");
         if ("eq".equals(operator) || "=".equals(operator) || "==".equals(operator)) return equal(actual, expected);
@@ -336,11 +558,14 @@ public class SimpleToggleMapper {
         if ("lt".equals(operator) || "<".equals(operator)) return compare(actual, expected) < 0;
         if ("lte".equals(operator) || "<=".equals(operator)) return compare(actual, expected) <= 0;
         if ("contains".equals(operator)) {
-            if (actual instanceof Collection) for (Object item : (Collection<Object>) actual) if (equal(item, expected)) return true;
-            return actual != null && String.valueOf(actual).contains(expected == null ? "" : String.valueOf(expected));
+            if (actual instanceof Collection) {
+                for (Object item : (Collection<Object>) actual) if (equal(item, expected)) return true;
+                return false;
+            }
+            return string(actual).contains(string(expected));
         }
-        if ("starts_with".equals(operator)) return (actual == null ? "" : String.valueOf(actual)).startsWith(expected == null ? "" : String.valueOf(expected));
-        if ("ends_with".equals(operator)) return (actual == null ? "" : String.valueOf(actual)).endsWith(expected == null ? "" : String.valueOf(expected));
+        if ("starts_with".equals(operator) || "startsWith".equals(operator)) return (actual == null ? "" : String.valueOf(actual)).startsWith(expected == null ? "" : String.valueOf(expected));
+        if ("ends_with".equals(operator) || "endsWith".equals(operator)) return (actual == null ? "" : String.valueOf(actual)).endsWith(expected == null ? "" : String.valueOf(expected));
         if ("in".equals(operator) || "not_in".equals(operator)) {
             boolean found = false;
             if (expected instanceof Collection) {
@@ -487,8 +712,64 @@ public class SimpleToggleMapper {
 
     private static String string(Object value) { return value == null ? "" : String.valueOf(value); }
 
-    private static final class Json {
-        static Object parse(String json) throws IOException { return new Parser(json).parse(); }
+    public static final class Json {
+        public static Object parse(String json) throws IOException { return new Parser(json).parse(); }
+
+        public static String stringify(Object value) {
+            StringBuilder out = new StringBuilder();
+            write(value, out);
+            return out.toString();
+        }
+        private static void write(Object value, StringBuilder out) {
+            if (value == null) { out.append("null"); return; }
+            if (value instanceof Boolean) { out.append(value); return; }
+            if (value instanceof Number) {
+                if (!Double.isFinite(((Number) value).doubleValue())) throw new IllegalArgumentException("JSON numbers must be finite");
+                out.append(new BigDecimal(value.toString()).stripTrailingZeros().toPlainString());
+                return;
+            }
+            if (value instanceof String || value instanceof Character) {
+                out.append('"');
+                for (char c : value.toString().toCharArray()) {
+                    if (c == '"' || c == '\\') out.append('\\').append(c);
+                    else if (c < 0x20 || Character.isSurrogate(c)) {
+                        String hex = Integer.toHexString(c);
+                        out.append("\\u");
+                        for (int i = hex.length(); i < 4; i++) out.append('0');
+                        out.append(hex);
+                    } else out.append(c);
+                }
+                out.append('"');
+                return;
+            }
+            if (value instanceof Map) {
+                out.append('{');
+                boolean first = true;
+                for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
+                    if (!(entry.getKey() instanceof String)) throw new IllegalArgumentException("JSON object keys must be strings");
+                    if (!first) out.append(',');
+                    first = false;
+                    write(entry.getKey(), out); out.append(':'); write(entry.getValue(), out);
+                }
+                out.append('}');
+                return;
+            }
+            if (value instanceof Iterable || value.getClass().isArray()) {
+                out.append('[');
+                if (value instanceof Iterable) {
+                    boolean first = true;
+                    for (Object item : (Iterable<?>) value) { if (!first) out.append(','); first = false; write(item, out); }
+                } else {
+                    for (int i = 0; i < java.lang.reflect.Array.getLength(value); i++) {
+                        if (i > 0) out.append(',');
+                        write(java.lang.reflect.Array.get(value, i), out);
+                    }
+                }
+                out.append(']');
+                return;
+            }
+            throw new IllegalArgumentException("Unsupported JSON value: " + value.getClass().getName());
+        }
 
         private static final class Parser {
             private final String s;
@@ -580,11 +861,11 @@ public class SimpleToggleMapper {
                 if (peek('.')) { decimal = true; i++; while (i < s.length() && Character.isDigit(s.charAt(i))) i++; }
                 if (i < s.length() && (s.charAt(i) == 'e' || s.charAt(i) == 'E')) {
                     decimal = true; i++;
-                    if (i < s.length() && (s.charAt(i) == '+' || s.charAt(i) == '-')) i++;
+                    if (peek('-') || peek('+')) i++;
                     while (i < s.length() && Character.isDigit(s.charAt(i))) i++;
                 }
                 String text = s.substring(start, i);
-                try { return decimal ? Double.valueOf(text) : Long.valueOf(text); }
+                try { if (decimal) return Double.valueOf(text); return Long.valueOf(text); }
                 catch (NumberFormatException ex) { error("Bad number: " + text); return null; }
             }
 

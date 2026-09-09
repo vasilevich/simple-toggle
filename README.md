@@ -253,12 +253,12 @@ Cache-Control: public, max-age=0, must-revalidate
 
 Clients can therefore keep a local definition and periodically revalidate cheaply with `If-None-Match`.
 
-# Java 8 local evaluator
+# Java 8 client
 
 A dependency-free Java 8 implementation is included at:
 
 ```text
-java/SimpleToggleMapper.java
+client/java/SimpleToggleMapper.java
 ```
 
 There is no Maven/Gradle dependency requirement. Copy the single file into your Java project and add your package declaration if needed.
@@ -279,7 +279,7 @@ for (Map<String, Object> order : orders) {
 }
 ```
 
-The second constructor argument is the same token used by the normal Simple Toggle web/admin API. The Java client sends it as a Bearer token only when fetching/revalidating a mapper by key.
+The second constructor argument is the same token used by the normal Simple Toggle web/admin API. The Java client sends it as a Bearer token for administrative operations, including fetching/revalidating a mapper by key. Permanent value/mapper token requests do not send it.
 
 `getMapper(key)` fetches the definition the first time and caches it in memory. `refreshMapper(key)` revalidates with the same Bearer token plus `If-None-Match`.
 
@@ -291,3 +291,42 @@ SimpleToggleMapper.MapperDefinition mapper = simpleToggle.getMapperByToken(mappe
 ```
 
 That permanent mapper token is the credential for `/m/<mapper-token>`.
+
+Direct value access is available on the same client:
+
+```java
+Object value = simpleToggle.getValueByKey("coupon", "default");
+Object direct = simpleToggle.getValueOnlyValue(valueToken, "default");
+simpleToggle.setValueByKey("coupon", "SALE");
+```
+
+See [the Java client README](client/java/README.md) for value controls, temporary links, toggles, and remote mapper helpers.
+
+# JavaScript client
+
+CommonJS and ESM package imports remain unchanged:
+
+```js
+const BotControl = require('bots-status-manager');
+// Or: import BotControl from 'bots-status-manager';
+
+BotControl.configure({url: 'https://toggle.example.com', token: process.env.SIMPLE_TOGGLE_TOKEN});
+const value = await BotControl.getValueByKey('coupon', 'default');
+const mapper = await BotControl.getMapper('kish-orders-coupons');
+const transformed = mapper.evaluate(order); // local deep copy
+mapper.apply(order);                       // local, in-place
+```
+
+The JS client also supports `refreshMapper`, `getMapperByToken`, `invalidate`, `clearCache`, and `evaluateDetailed`. It shares its evaluator with the server rather than maintaining a second JS implementation.
+
+See [the JS client README](client/js/README.md) and [the client API comparison](client/README.md).
+
+# Client layout and tests
+
+```text
+client/
+  js/    # CommonJS, ESM, TypeScript declarations, local evaluator
+  java/  # Dependency-free Java 8 client and local evaluator
+```
+
+`npm test` runs the JS suite and cross-language HTTP/rule fixtures. Tests require Node.js 18+ and a JDK 8+ (`java` and `javac` on PATH), but no server, database, or npm dependency installation. Java test classes are compiled into a temporary directory. Only `client/js/` is included in the npm package.
