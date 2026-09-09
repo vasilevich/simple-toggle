@@ -1,6 +1,7 @@
 export interface BotControlConfig {
     url: string;
-    token: string;
+    /** Optional when using permanent value/mapper tokens only. */
+    token?: string;
 }
 
 export interface ApiResult {
@@ -93,8 +94,9 @@ export type MapperAction = MapperSetAction | MapperUnsetAction;
 
 export interface MapperRule {
     name?: string;
-    when: MapperGroup | MapperCondition;
-    actions: MapperAction[];
+    enabled?: boolean;
+    when?: MapperGroup | MapperCondition;
+    actions?: MapperAction[];
     afterMatch?: 'continue' | 'stop';
     /** Legacy v1 representation; accepted and normalized into constant set actions. */
     result?: Record<string, any>;
@@ -130,16 +132,46 @@ export interface MapperOptions {
     meta?: boolean;
 }
 
+export interface MapperEvaluationResult {
+    output: Record<string, any>;
+    changes: Record<string, any>;
+    /** Alias of changes, matching the server's detailed response. */
+    result: Record<string, any>;
+    unsetFields: string[];
+    matched: boolean;
+    matchedRules: Array<{index: number; name: string; afterMatch: 'continue' | 'stop'}>;
+    ruleIndex: number;
+    ruleName: string;
+}
+
+export class MapperDefinition {
+    constructor(definition: Partial<ConditionMapper>, etag?: string | null);
+    getKey(): string;
+    getTitle(): string;
+    getDescription(): string;
+    getToken(): string;
+    getRevision(): string;
+    getEtag(): string | null;
+    getExample(): Record<string, any>;
+    getRules(): MapperRule[];
+    /** Local execution; returns a deep copy without changing input. */
+    evaluate(input?: Record<string, any> | null): Record<string, any>;
+    /** Local execution; mutates and returns target, including nested objects/arrays. */
+    apply<T extends Record<string, any>>(target: T): T;
+    evaluateDetailed(input?: Record<string, any> | null): MapperEvaluationResult;
+}
+
 export default class BotControl {
     static url: string;
     static token: string;
     static DEFAULT_TEMP_LINK_MINUTES: number;
+    static MapperDefinition: typeof MapperDefinition;
 
     constructor(botName: string);
 
     static configure(config: BotControlConfig): typeof BotControl;
-    static configure(url: string, token: string): typeof BotControl;
-    static init(url: string, token: string): typeof BotControl;
+    static configure(url: string, token?: string): typeof BotControl;
+    static init(url: string, token?: string): typeof BotControl;
     static getAuthorizationHeader(): {Authorization: string};
     static getRequest(fullUrl: string): Promise<ApiResult>;
     static deleteRequest(fullUrl: string): Promise<ApiResult>;
@@ -155,13 +187,21 @@ export default class BotControl {
     static createTemporarySetUrl(valueToken: string, expiresInMinutes?: number): Promise<TemporarySetLink>;
     static createTemporarySetUrlByKey(key: string, botName?: string | null, expiresInMinutes?: number): Promise<TemporarySetLink>;
 
+    /** Cached definition for local execution; requires the admin token. */
+    static getMapper(key: string): Promise<MapperDefinition>;
+    /** Conditional HTTP revalidation; returns the cached instance on 304. */
+    static refreshMapper(key: string): Promise<MapperDefinition>;
+    /** Fetch using only the permanent mapper token as the credential. */
+    static getMapperByToken(token: string): Promise<MapperDefinition>;
+    static invalidate(key: string): void;
+    static clearCache(): void;
     static getMappers(): Promise<ConditionMapper[]>;
     static findMapper(key: string): Promise<ConditionMapper | null>;
     static createMapper(config: MapperConfig): Promise<ApiResult>;
     static updateMapper(mapperToken: string, config: Partial<MapperConfig>): Promise<ApiResult>;
     static deleteMapper(mapperToken: string): Promise<ApiResult>;
     static getMapperUrl(mapperToken: string, options?: MapperOptions): string;
-    /** Server-side mapper execution is a debugging convenience; production bulk processing should evaluate downloaded definitions locally. */
+    /** Server-side execution is a debugging convenience; bulk processing should evaluate downloaded definitions locally. */
     static mapRequest(mapperToken: string, input: Record<string, any>, options?: MapperOptions): Promise<ApiResult>;
     static map(mapperToken: string, input: Record<string, any>, options?: MapperOptions): Promise<any>;
     static applyMap(mapperToken: string, input: Record<string, any>): Promise<Record<string, any>>;
