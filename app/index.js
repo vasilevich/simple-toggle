@@ -9,6 +9,7 @@ const {existsSync, unlinkSync, chmodSync} = require('fs');
 const registerConditionMapper = require('./condition_mapper');
 const registerHistory = require('./history');
 const registerMcp = require('./mcp');
+const ensureValueTextStorage = require('./value_text_storage');
 const token = config.get('token');
 const configuredUrl = config.has('url') ? config.get('url') : '';
 const getBaseUrl = req => (configuredUrl || `${req.protocol}://${req.get('host')}`).replace(/\/+$/, '');
@@ -32,7 +33,7 @@ const generateRandomToken = () => new Promise(resolve => {
 });
 const generateShortCode = () => randomBytes(6).toString('base64url');
 
-knex.schema.hasTable('bot_control')
+const valueSchemaReady = knex.schema.hasTable('bot_control')
     .then(exists => {
         if (!exists) {
             return knex.schema.createTable('bot_control', table => {
@@ -70,14 +71,18 @@ knex.schema.hasTable('bot_control')
                 table.dateTime('created_at').notNullable();
             });
         }
-    })
-    .catch(err => console.log(err.message));
+    });
+valueSchemaReady.catch(err => console.error('Unable to initialize value storage:', err.message));
 
 const app = express();
 app.use(express.static('public'));
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({extended: false}));
+// A 1 MiB text file can expand six-fold when JSON-escaped.
+app.use(bodyParser.json({limit: '8mb'}));
+app.use(bodyParser.urlencoded({extended: false, limit: '8mb'}));
 app.use(cors());
+app.use((req, res, next) => {
+    textStorageReady.then(() => next(), () => res.status(503).json({error: 'Value storage is not ready.'}));
+});
 
 const verify_request = (req, res) => {
     const query_param_token = req.query.token;
@@ -108,6 +113,9 @@ const history = registerHistory({
     verify_request,
     historyLimit: config.has('historyLimit') ? config.get('historyLimit') : 100
 });
+const textStorageReady = Promise.all([valueSchemaReady, history.schemaReady])
+    .then(() => ensureValueTextStorage(knex, config.get('knex').client));
+textStorageReady.catch(err => console.error('Unable to prepare text values:', err.message));
 const mapperApi = registerConditionMapper({app, knex, verify_request, generateRandomToken, getBaseUrl, history});
 registerMcp({app, knex, history, mapperApi, generateRandomToken, configuredUrl, temporaryLinkTable: TEMP_LINK_TABLE});
 
@@ -150,10 +158,11 @@ const temporaryPage = ({title, message, code, key, description, status = 200}) =
 <meta name="color-scheme" content="light dark">
 <title>${escapeHtml(title)}</title>
 <style>
-:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#0f172a;color:#e5e7eb}.card{width:min(520px,100%);background:#111827;border:1px solid #334155;border-radius:18px;padding:28px;box-shadow:0 24px 70px #0007}.tag{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#93c5fd;margin-bottom:8px}h1{margin:0 0 8px;font-size:28px}p{color:#cbd5e1;line-height:1.5}.description{white-space:pre-wrap}.notice{padding:12px 14px;border:1px solid #475569;border-radius:10px;background:#1e293b;margin:18px 0}label{display:block;font-weight:600;margin:18px 0 8px}input{width:100%;padding:13px 14px;border-radius:10px;border:1px solid #475569;background:#0f172a;color:#fff;font:inherit}button{width:100%;margin-top:14px;padding:13px 16px;border:0;border-radius:10px;background:#2563eb;color:white;font:inherit;font-weight:700;cursor:pointer}small{display:block;color:#94a3b8;margin-top:14px;text-align:center}@media(prefers-color-scheme:light){body{background:#f1f5f9;color:#0f172a}.card{background:#fff;border-color:#cbd5e1;box-shadow:0 24px 70px #64748b25}p{color:#475569}.notice{background:#f8fafc;border-color:#cbd5e1}input{background:#fff;color:#0f172a;border-color:#cbd5e1}small{color:#64748b}}
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#0f172a;color:#e5e7eb}.card{width:min(520px,100%);background:#111827;border:1px solid #334155;border-radius:18px;padding:28px;box-shadow:0 24px 70px #0007}.tag{display:inline-block;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#93c5fd;margin-bottom:8px}h1{margin:0 0 8px;font-size:28px}p{color:#cbd5e1;line-height:1.5}.description{white-space:pre-wrap}.notice{padding:12px 14px;border:1px solid #475569;border-radius:10px;background:#1e293b;margin:18px 0}label{display:block;font-weight:600;margin:18px 0 8px}input,textarea{width:100%;padding:13px 14px;border-radius:10px;border:1px solid #475569;background:#0f172a;color:#fff;font:inherit}button{width:100%;margin-top:14px;padding:13px 16px;border:0;border-radius:10px;background:#2563eb;color:white;font:inherit;font-weight:700;cursor:pointer}small{display:block;color:#94a3b8;margin-top:14px;text-align:center}@media(prefers-color-scheme:light){body{background:#f1f5f9;color:#0f172a}.card{background:#fff;border-color:#cbd5e1;box-shadow:0 24px 70px #64748b25}p{color:#475569}.notice{background:#f8fafc;border-color:#cbd5e1}input,textarea{background:#fff;color:#0f172a;border-color:#cbd5e1}small{color:#64748b}}
 </style>
+<link rel="stylesheet" href="/css/value_text.css">
 </head>
-<body><main class="card"><div class="tag">One-time value link</div><h1>${escapeHtml(title)}</h1>${message ? `<div class="notice">${escapeHtml(message)}</div>` : ''}${key ? `<p><strong>${escapeHtml(key)}</strong></p>` : ''}${description ? `<p class="description">${escapeHtml(description)}</p>` : ''}${status === 200 && code ? `<form method="post" action="/t/${escapeHtml(code)}"><label for="value">Value</label><input id="value" name="value" autocomplete="off" autofocus><button type="submit">Set value</button></form><small>This link can be used once. After a successful submit it becomes invalid.</small>` : ''}</main></body></html>`;
+<body><main class="card"><div class="tag">One-time value link</div><h1>${escapeHtml(title)}</h1>${message ? `<div class="notice">${escapeHtml(message)}</div>` : ''}${key ? `<p><strong>${escapeHtml(key)}</strong></p>` : ''}${description ? `<p class="description">${escapeHtml(description)}</p>` : ''}${status === 200 && code ? `<form id="temporary-value-form" method="post" action="/t/${escapeHtml(code)}"><label for="value">Value</label><textarea id="value" name="value" rows="6" autocomplete="off" autofocus></textarea><button type="submit">Set value</button></form><small>This link can be used once. After a successful submit it becomes invalid.</small>` : ''}<div id="value-message" class="notice" role="status" hidden></div></main><script src="/js/value_text.js"></script><script src="/js/temporary_value.js"></script></body></html>`;
 
 const getTemporaryLink = async code => {
     const link = await knex(TEMP_LINK_TABLE).where('code', code).first();

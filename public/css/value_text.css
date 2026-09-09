@@ -1,0 +1,14 @@
+textarea.value-text-input {
+    width: 100%;
+    min-width: 0;
+    min-height: 6em;
+    resize: vertical;
+    white-space: pre;
+    overflow-wrap: normal;
+    tab-size: 4;
+    font-family: ui-monospace, Consolas, monospace;
+}
+.value-file-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 12px; }
+.value-file-tools button { width: auto; margin: 0; }
+.value-file-status { font-size: 12px; overflow-wrap: anywhere; }
+.value-file-error { color: #dc2626; }

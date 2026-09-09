@@ -137,7 +137,7 @@
             </div>
             <p class="description"></p>
             <div class="value-row">
-                <input class="value-input" type="text" aria-label="Value">
+                <textarea class="value-input" rows="4" aria-label="Value"></textarea>
                 <button class="button button-primary button-small save-value" type="button">Save</button>
             </div>
             <div class="card-actions">
@@ -152,7 +152,7 @@
         card.querySelector('.bot-name').textContent = item.botName || 'none';
         card.querySelector('.description').textContent = item.description || 'No description';
         const input = card.querySelector('.value-input');
-        input.value = item.value ?? '';
+        const editor = ValueText.bind(input, item.value);
 
         const pageUrl = `/bot_value_set.html?valueToken=${encodeURIComponent(item.token)}`;
         const apiUrl = `${location.origin}/v/${encodeURIComponent(item.token)}?only_value=true`;
@@ -165,7 +165,7 @@
             try {
                 await api(`/bot/set_value/${encodeURIComponent(item.token)}`, {
                     method: 'POST',
-                    body: JSON.stringify({value: input.value})
+                    body: JSON.stringify({value: editor.getValue()})
                 });
                 save.textContent = 'Saved';
                 setTimeout(() => save.textContent = 'Save', 900);
@@ -304,6 +304,7 @@
         }
     });
 
+    const initialValue = ValueText.bind(document.getElementById('value-initial-input'));
     document.getElementById('create-value-form').addEventListener('submit', async event => {
         event.preventDefault();
         const submit = event.submitter;
@@ -314,7 +315,7 @@
                 body: JSON.stringify({
                     key: document.getElementById('value-key-input').value.trim(),
                     bot_name: document.getElementById('value-bot-input').value.trim() || 'none',
-                    value: document.getElementById('value-initial-input').value,
+                    value: initialValue.getValue(),
                     description: document.getElementById('value-description-input').value.trim()
                 })
             });

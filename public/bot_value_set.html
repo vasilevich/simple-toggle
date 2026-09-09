@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light dark">
     <title>Simple Toggle · Value</title>
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/value_text.css">
 </head>
 <body>
 <main class="login-shell">
@@ -14,7 +15,7 @@
         <h1 id="key">Loading…</h1>
         <p id="description">Loading value control…</p>
         <form id="value-form">
-            <label>Value<input type="text" id="value" autocomplete="off"></label>
+            <label>Value<textarea id="value" rows="8" autocomplete="off"></textarea></label>
             <button id="save-button" type="submit" class="button button-primary">Save value</button>
         </form>
         <div id="page-message" class="alert" hidden></div>
@@ -35,6 +36,7 @@
         <a class="button button-secondary back-link" href="/">Back to dashboard</a>
     </section>
 </main>
+<script src="js/value_text.js"></script>
 <script src="js/bot_value_set.js"></script>
 </body>
 </html>
